@@ -41,8 +41,8 @@ th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:4px
 td{padding:3px 3px;border-top:1px solid var(--line)}
 td input{padding:5px 8px}
 tr.sel td{background:color-mix(in srgb,var(--brand) 10%,transparent)}
-tr.chk td.n{color:var(--warn);font-weight:700}
-tr.chk td.n::after{content:"⚠";font-size:11px}
+tr.uncertain td.n{color:var(--warn);font-weight:700}
+tr.uncertain td.n::after{content:"⚠";font-size:11px}
 td.n{width:28px;color:var(--muted);text-align:center;cursor:pointer}
 td.btns{width:90px;white-space:nowrap;text-align:right}
 #msg{margin-top:10px;font-size:13.5px}
@@ -1041,7 +1041,7 @@ function syncForm(){
 function renderRows(){
   const tb = $("#rows"); tb.innerHTML="";
   state.participants.forEach((p,i)=>{
-    const tr = document.createElement("tr"); tr.className = (i===state.sel?"sel":"")+(p.chk?" chk":"");
+    const tr = document.createElement("tr"); tr.className = (i===state.sel?"sel":"")+(p.chk?" uncertain":"");
     tr.innerHTML = `<td class="n" title="Afficher l’aperçu">${i+1}</td>
       <td><input type="text" data-k="nom" aria-label="Nom"></td>
       <td><input type="text" data-k="prenom" aria-label="Prénom"></td>
@@ -1049,7 +1049,7 @@ function renderRows(){
     tr.querySelector('[data-k=nom]').value = p.nom; tr.querySelector('[data-k=prenom]').value = p.prenom;
     tr.querySelectorAll("input").forEach(inp=>{
       inp.addEventListener("focus",()=>{ if(state.sel!==i){ state.sel=i; markSel(); refresh(); } });
-      inp.addEventListener("input",()=>{ p[inp.dataset.k]=inp.value; if(p.chk){ delete p.chk; tr.classList.remove("chk"); } refresh(true); });
+      inp.addEventListener("input",()=>{ p[inp.dataset.k]=inp.value; if(p.chk){ delete p.chk; tr.classList.remove("uncertain"); } refresh(true); });
     });
     tr.querySelector(".n").onclick=()=>{ state.sel=i; markSel(); refresh(); };
     tr.querySelector('[data-a=swap]').onclick=()=>{ [p.nom,p.prenom]=[p.prenom.toUpperCase(),titleCase(p.nom)]; state.sel=i; renderRows(); refresh(); };
