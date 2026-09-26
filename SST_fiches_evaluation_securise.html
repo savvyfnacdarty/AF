@@ -41,6 +41,8 @@ th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:4px
 td{padding:3px 3px;border-top:1px solid var(--line)}
 td input{padding:5px 8px}
 tr.sel td{background:color-mix(in srgb,var(--brand) 10%,transparent)}
+tr.chk td.n{color:var(--warn);font-weight:700}
+tr.chk td.n::after{content:"⚠";font-size:11px}
 td.n{width:28px;color:var(--muted);text-align:center;cursor:pointer}
 td.btns{width:90px;white-space:nowrap;text-align:right}
 #msg{margin-top:10px;font-size:13.5px}
@@ -134,7 +136,7 @@ body:not(.locked) #authGate{display:none}
       <h2><span class="num">1</span> Importer la feuille d’émargement</h2>
       <div id="drop" tabindex="0" role="button" aria-label="Choisir une feuille d’émargement PDF">
         <strong>Déposez le PDF ici</strong> ou cliquez pour le choisir<br>
-        <span class="hint">Formats reconnus automatiquement : Syfadis (« Nom - Prénom ») et feuille avec matricule / site. Plusieurs fichiers possibles.</span>
+        <span class="hint">Formats reconnus automatiquement : Syfadis (« Nom - Prénom »), feuille « Intitulé de la session / Code session » et feuille avec matricule / site. Plusieurs fichiers possibles.</span>
       </div>
       <input id="file" type="file" accept="application/pdf" multiple hidden>
       <div id="msg" aria-live="polite"></div>
@@ -171,7 +173,7 @@ body:not(.locked) #authGate{display:none}
       <div class="actions">
         <button id="add">+ Ajouter un participant</button>
       </div>
-      <p class="hint">Noms composés : si le nom ou le prénom est mal coupé, corrigez-le ici ou utilisez ⇄ pour inverser. Les accents absents de l’émargement peuvent être ajoutés à la main.</p>
+      <p class="hint">Noms composés : les lignes marquées ⚠ ont une coupure nom / prénom incertaine (feuille tout en majuscules) : vérifiez-les, corrigez ici ou utilisez ⇄ pour inverser. Les accents absents de l’émargement peuvent être ajoutés à la main.</p>
     </section>
 
     <div id="step1">
@@ -762,9 +764,16 @@ async function pdfLines(buf){
 }
 
 const NAME_RE = /^[\p{L}][\p{L}'’\-. ]{1,}$/u;
-function splitNomFirst(full){           // "LE BONT AUDREY" -> nom / prénom
-  const t = full.split(/\s+/); if (t.length===1) return {nom:t[0].toUpperCase(),prenom:""};
-  return {nom:t.slice(0,-1).join(" ").toUpperCase(), prenom:titleCase(t[t.length-1])};
+const PREN_LEAD = new Set(["JEAN","MARIE","MARIA","ANNE","ANA","PIERRE","LOUIS","LUIS","JOSE","PAULO","PAUL","CHARLES","JOAO","CARLOS","JUAN","MARC","MICHEL"]);
+function splitNomFirst(full){           // "LE BONT AUDREY" -> nom / prénom (nom d'abord)
+  const t = full.split(/\s+/).filter(Boolean); if (t.length<=1) return {nom:(t[0]||"").toUpperCase(),prenom:""};
+  const up = s=>s===s.toUpperCase(), mixed = t.some(s=>!up(s));
+  let k;
+  if (mixed){ k = t.findIndex(s=>!up(s)); if (k<=0) k = t.length-1; }         // « BOUDAOUD Yassin » : 1er mot non majuscule
+  else { k = t.length-1; if (t.length>=3 && PREN_LEAD.has(t[t.length-2])) k = t.length-2; }   // « AFONSO JEAN PHILIPPE »
+  const r = {nom:t.slice(0,k).join(" ").toUpperCase(), prenom:titleCase(t.slice(k).join(" "))};
+  if (!mixed && t.length>=3) r.chk = true;                                      // coupure nom / prénom incertaine
+  return r;
 }
 function splitPrenomFirst(full){        // "MICKAEL LE BRIS" -> prénom / nom
   const t = full.split(/\s+/); if (t.length===1) return {nom:t[0].toUpperCase(),prenom:""};
@@ -784,10 +793,39 @@ function fmtDates(list){
 function parseSession(lines){
   const out = {formation:"",dates:[],formateur:"",lieu:"",people:[],format:""};
   const all = lines.map(l=>l.text);
+  const isV2 = all.some(t=>/Nom et prénom des participants/i.test(t));
   const isV1 = all.some(t=>/Nom\s*-\s*Prénom/i.test(t));
   const isV3 = all.some(t=>/^([DF]\d{4,}|\S+@\S+\.\S+)$/i.test(t));
 
-  if (isV1){
+  if (isV2){
+    out.format = "Émargement « Intitulé de la session / Code session »";
+    let inP=false, m;
+    const iI = lines.findIndex(l=>/Intitulé de la session/i.test(l.text)), iD = lines.findIndex(l=>/Date de début/i.test(l.text));
+    if (iI>=0){
+      const dIt = iD>=0 ? lines[iD].items.find(it=>/^\d{1,2}\/\d{1,2}\/\d{4}/.test(it.s)) : null;
+      const cIt = lines[iI].items.find(it=>/^Code/i.test(it.s));
+      const valX = dIt ? dIt.x : 0, codeX = cIt ? cIt.x : 1e9, parts=[];
+      for (let i=Math.max(0,iI-1); i<(iD>=0?iD:iI+2); i++)
+        for (const it of lines[i].items) if (it.x>=valX-3 && it.x<codeX-3 && !/^(Intitulé|Date de|Lieu)/i.test(it.s)) parts.push(it.s);
+      out.formation = parts.join(" ").trim();
+    }
+    for (const l of lines){
+      const t = l.text;
+      if ((m=t.match(/Date de début\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/i)) && !out.dates[0]) out.dates[0]=m.slice(1);
+      if ((m=t.match(/Date de fin\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/i)) && !out.dates[1]) out.dates[1]=m.slice(1);
+      if ((m=t.match(/^Lieu\s+(.+?)(?:\s+Organisme|$)/i)) && !out.lieu) out.lieu = m[1].trim();
+      if ((m=t.match(/formateurs?\s+(.+?)(?:\s+Durée de la session|$)/i)) && !out.formateur && /Nom du/i.test(t)){
+        const s = splitNomFirst(m[1].trim()); out.formateur = (s.prenom+" "+s.nom).trim();
+      }
+      if (/FEUILLE D.?EMARGEMENT/i.test(t)) { inP=false; continue; }
+      if (/SIGNATURE du\/des formateur/i.test(t)) { inP=false; continue; }
+      if (/Nom et prénom des participants/i.test(t)) { inP=true; continue; }
+      if (!inP) continue;
+      const name = l.items.filter(i=>!/^(Matin|Après)/i.test(i.s)).map(i=>i.s).join(" ").trim();
+      if (NAME_RE.test(name) && !/signature|participants|matin|après|^date/i.test(name)) out.people.push(splitNomFirst(name));
+    }
+    out.dates = out.dates.filter(Boolean);
+  } else if (isV1){
     out.format = "Syfadis (Nom - Prénom)";
     let inP=false;
     for (const l of lines){
@@ -1003,7 +1041,7 @@ function syncForm(){
 function renderRows(){
   const tb = $("#rows"); tb.innerHTML="";
   state.participants.forEach((p,i)=>{
-    const tr = document.createElement("tr"); if(i===state.sel) tr.className="sel";
+    const tr = document.createElement("tr"); tr.className = (i===state.sel?"sel":"")+(p.chk?" chk":"");
     tr.innerHTML = `<td class="n" title="Afficher l’aperçu">${i+1}</td>
       <td><input type="text" data-k="nom" aria-label="Nom"></td>
       <td><input type="text" data-k="prenom" aria-label="Prénom"></td>
@@ -1011,7 +1049,7 @@ function renderRows(){
     tr.querySelector('[data-k=nom]').value = p.nom; tr.querySelector('[data-k=prenom]').value = p.prenom;
     tr.querySelectorAll("input").forEach(inp=>{
       inp.addEventListener("focus",()=>{ if(state.sel!==i){ state.sel=i; markSel(); refresh(); } });
-      inp.addEventListener("input",()=>{ p[inp.dataset.k]=inp.value; refresh(true); });
+      inp.addEventListener("input",()=>{ p[inp.dataset.k]=inp.value; if(p.chk){ delete p.chk; tr.classList.remove("chk"); } refresh(true); });
     });
     tr.querySelector(".n").onclick=()=>{ state.sel=i; markSel(); refresh(); };
     tr.querySelector('[data-a=swap]').onclick=()=>{ [p.nom,p.prenom]=[p.prenom.toUpperCase(),titleCase(p.nom)]; state.sel=i; renderRows(); refresh(); };
