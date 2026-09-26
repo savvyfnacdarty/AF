@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Publier les ressources</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font:15px/1.5 "Segoe UI",Arial,sans-serif;background:#f4f2ee;color:#1b1a18;margin:0;padding:24px}
+.card{max-width:520px;margin:0 auto;background:#fff;border:1px solid #dedad1;border-radius:8px;padding:24px}
+h1{font-size:19px;margin:0 0 6px}p{color:#4a463f;margin:0 0 16px}
+label{display:block;margin:0 0 12px;font-size:13px}input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:9px 10px;font:inherit;border:1px solid #c6c0b4;border-radius:6px}
+button{padding:10px 14px;font:600 14px inherit;color:#fff;background:#c8102e;border:0;border-radius:6px;cursor:pointer}button:disabled{opacity:.5}
+#log{white-space:pre-wrap;font-size:13px;margin-top:14px}.ok{color:#1c6b45}.ko{color:#a61d18}
+</style></head><body>
+<div class="card">
+  <h1>Publier les ressources sécurisées</h1>
+  <p>À utiliser une seule fois (puis à chaque changement de logo, cachet ou masque du titre). Ouvrez cette page depuis votre poste, connectez-vous avec le compte administrateur, choisissez le fichier <b>d'origine</b> de l'outil (celui qui contient encore le logo et le cachet).</p>
+  <label>E-mail administrateur<input id="em" type="email" autocomplete="username"></label>
+  <label>Mot de passe<input id="pw" type="password" autocomplete="current-password"></label>
+  <label>Fichier d'origine de l'outil (.html)<input id="fi" type="file" accept=".html"></label>
+  <button id="go">Publier dans Firestore</button>
+  <div id="log"></div>
+</div>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore-lite.js";
+
+/* >>> Même configuration web que dans Attestations_habilitation_et_gaz_securise.html */
+const firebaseConfig = {
+  apiKey: "REMPLACER_PAR_VOTRE_API_KEY",
+  authDomain: "REMPLACER.firebaseapp.com",
+  projectId: "REMPLACER",
+  appId: "REMPLACER"
+};
+
+const $ = id => document.getElementById(id), log = (t, c) => { $("log").className = c || ""; $("log").textContent = t; };
+$("go").onclick = async () => {
+  try{
+    if(firebaseConfig.apiKey.startsWith("REMPLACER")) return log("Renseignez d'abord firebaseConfig dans ce fichier.", "ko");
+    const f = $("fi").files[0]; if(!f) return log("Choisissez le fichier d'origine de l'outil.", "ko");
+    const s = await f.text();
+    const grab = n => { const m = s.match(new RegExp("^const " + n + " = (.*?);[ \\t]*(?://.*)?$", "m")); if(!m) throw new Error(n + " introuvable : ce n'est pas le fichier d'origine (déjà sécurisé ?)."); return JSON.parse(m[1]); };
+    const logo = grab("LOGO"), stamp = grab("STAMP"), tpl = grab("DOCX_TPL");
+    if(!tpl.parts || !tpl.media) throw new Error("DOCX_TPL invalide.");
+    const docxTpl = JSON.stringify(tpl);
+    if(logo.length + stamp.length + docxTpl.length > 950000) throw new Error("Ressources trop volumineuses pour un document Firestore (limite 1 Mo).");
+    $("go").disabled = true; log("Connexion…");
+    const app = initializeApp(firebaseConfig), auth = getAuth(app);
+    await signInWithEmailAndPassword(auth, $("em").value.trim(), $("pw").value);
+    await setDoc(doc(getFirestore(app), "secure", "assets"), { logo, stamp, docxTpl, updatedAt: new Date().toISOString() });
+    log("Ressources publiées (" + Math.round((logo.length + stamp.length + docxTpl.length) / 1024) + " Ko). Vous pouvez fermer cette page.", "ok");
+  }catch(e){ log("Échec : " + (e.code || "") + " " + (e.message || e), "ko"); }
+  $("go").disabled = false;
+};
+</script></body></html>
