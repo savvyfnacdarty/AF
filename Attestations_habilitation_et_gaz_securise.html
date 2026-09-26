@@ -343,6 +343,7 @@ body:not(.locked) #authGate{display:none}
 
   <div class="bar">
     <button id="btnImportPdf" class="primary">Importer une feuille d'émargement</button>
+    <button id="btnQcm" class="ghost">Importer les notes QCM (capture)</button>
     <button id="btnAdd" class="ghost">+ Ajouter un participant</button>
     <button id="btnAllOk" class="ghost">Tout valider</button>
     <button id="btnFilSite" class="ghost">Filiale / site pour tous…</button>
@@ -446,6 +447,267 @@ body:not(.locked) #authGate{display:none}
   </div>
 </div>
 <input type="file" id="filePdf" accept="application/pdf,.pdf" hidden>
+<!-- ============ IMPORT DES NOTES QCM (capture d'écran) ============ -->
+<div class="overlay" id="qcm" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="qcmTitle">
+    <div class="hd"><div style="flex:1"><h2 id="qcmTitle">Importer les notes QCM</h2><p id="qcmSub"></p></div></div>
+    <div class="bd" id="qcmBody"></div>
+    <div class="ft" id="qcmFoot"></div>
+  </div>
+</div>
+<input type="file" id="fileQcm" accept="image/*" hidden>
+<script>"use strict";
+/* ---------- cœur : lecture du texte OCR et rapprochement des noms (fonctions pures) ---------- */
+const QCM_NOACC = s => (s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
+function qcmTokens(s){
+  return QCM_NOACC(s).replace(/[^a-z\s'\-]/g," ").split(/[\s'\-]+/).filter(t=>t.length>0);
+}
+function qcmLev(a,b){
+  const m=a.length, n=b.length; if(!m) return n; if(!n) return m;
+  let prev=[]; for(let j=0;j<=n;j++) prev[j]=j;
+  for(let i=1;i<=m;i++){
+    const cur=[i];
+    for(let j=1;j<=n;j++) cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    prev=cur;
+  }
+  return prev[n];
+}
+function qcmSim(a,b){ const L=Math.max(a.length,b.length); return L? 1-qcmLev(a,b)/L : 0; }
+/* score 0..1 entre deux listes de mots, sans tenir compte de l'ordre (Nom Prénom / Prénom Nom) */
+function qcmScore(ta,tb){
+  if(!ta.length||!tb.length) return 0;
+  const big = ta.length>=tb.length ? ta : tb, small = ta.length>=tb.length ? tb : ta;
+  const used = new Array(big.length).fill(false); let sum=0;
+  small.forEach(w=>{
+    let best=-1, bi=-1;
+    big.forEach((x,i)=>{ if(used[i]) return; const s=qcmSim(w,x); if(s>best){best=s;bi=i;} });
+    if(bi>=0){ used[bi]=true; sum+= best>=0.6 ? best : 0; }
+  });
+  return sum/big.length;
+}
+/* Lit le texte OCR : une ligne = date, prénom nom, code session, note. */
+function qcmParse(text, max){
+  const out=[], codes=[]; let ignored=0;
+  String(text||"").split(/\r?\n/).forEach(raw=>{
+    let line = raw.replace(/[|¦_\[\]{}]/g," ").replace(/\s+/g," ").trim();
+    if(!line) return;
+    const dm = line.match(/\b\d{1,2}\s?[\/.\-]\s?\d{1,2}\s?[\/.\-]\s?\d{2,4}\b/);
+    const sm = line.match(/\b\d{5,8}\b/);
+    if(!dm && !sm){ ignored++; return; }
+    let rest = line;
+    if(dm) rest = rest.replace(dm[0]," ");
+    let name, after;
+    const sm2 = rest.match(/\b\d{5,8}\b/);
+    if(sm2){
+      codes.push(sm2[0]);
+      name = rest.slice(0,sm2.index); after = rest.slice(sm2.index+sm2[0].length);
+    } else {
+      const t = rest.match(/^(.*?[A-Za-zÀ-ÿ])[^A-Za-zÀ-ÿ]*?(\d{1,3}(?:[.,]\d+)?)?\s*$/);
+      name = t ? t[1] : rest; after = t && t[2] ? t[2] : "";
+    }
+    name = name.replace(/[^A-Za-zÀ-ÿ'\- ]/g," ").replace(/\s+/g," ").trim();
+    if(name.replace(/[^A-Za-zÀ-ÿ]/g,"").length<2){ ignored++; return; }
+    after = after.trim();
+    if(!dm && !after){ ignored++; return; }
+    if(/^(session|date|notes?|prenom|nom)$/.test(QCM_NOACC(name).trim())){ ignored++; return; }
+    let note=null, problem="";
+    const nm = after.match(/^\D{0,2}(\d{1,3}(?:[.,]\d+)?)\s*$/);
+    if(nm){
+      note = parseFloat(nm[1].replace(",","."));
+      if(note>max){ problem="Hors barème (max "+max+")"; }
+    } else { problem = after ? "Note illisible (« "+after+" »)" : "Note absente"; }
+    out.push({ocr:name, note:note, problem:problem, match:-1, score:0});
+  });
+  return {items:out, codes:Array.from(new Set(codes)), ignored:ignored};
+}
+/* Rapproche chaque ligne OCR d'un participant (meilleures paires d'abord, un participant = une ligne) */
+function qcmMatch(items, rows){
+  const rt = rows.map(r=>qcmTokens((r.nom||"")+" "+(r.prenom||"")));
+  const pairs=[];
+  items.forEach((it,i)=>{ const t=qcmTokens(it.ocr); rt.forEach((x,j)=>{ const s=qcmScore(t,x); if(s>=0.55) pairs.push([s,i,j]); }); });
+  pairs.sort((a,b)=>b[0]-a[0]);
+  const ui={}, uj={};
+  pairs.forEach(([s,i,j])=>{ if(ui[i]||uj[j]) return; ui[i]=uj[j]=true; items[i].match=j; items[i].score=s; });
+  return items;
+}
+
+/* ---------- interface : import des notes QCM depuis une capture d'écran ---------- */
+const TESS_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js";
+let QZ = {step:"drop", busy:false, status:"", error:"", res:null, img:null};
+let tessP = null, tessW = null;
+
+function loadTess(){
+  if(tessP) return tessP;
+  tessP = new Promise((ok,ko)=>{
+    if(window.Tesseract) return ok(window.Tesseract);
+    const s = document.createElement("script"); s.src = TESS_URL;
+    s.onload = ()=> window.Tesseract ? ok(window.Tesseract) : ko(new Error("bibliothèque introuvable"));
+    s.onerror = ()=>{ tessP = null; ko(new Error("Impossible de charger le module de lecture d'image (connexion Internet requise la première fois).")); };
+    document.head.appendChild(s);
+  });
+  return tessP;
+}
+function qStatus(t){ QZ.status = t; const el = $("#qcmStatus"); if(el) el.textContent = t; }
+
+/* agrandit et passe en niveaux de gris : une capture de 500 px lue telle quelle donne des erreurs (39 → « ES ») */
+function qPrep(file){
+  return new Promise((ok,ko)=>{
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = ()=>{
+      const k = im.width<1200 ? 3 : im.width<2200 ? 2 : 1, pad = 24;
+      const c = document.createElement("canvas");
+      c.width = im.width*k + pad*2; c.height = im.height*k + pad*2;
+      const x = c.getContext("2d");
+      x.fillStyle = "#fff"; x.fillRect(0,0,c.width,c.height);
+      x.imageSmoothingQuality = "high"; x.drawImage(im, pad, pad, im.width*k, im.height*k);
+      const d = x.getImageData(0,0,c.width,c.height), p = d.data;
+      for(let i=0;i<p.length;i+=4){ const g = (p[i]*0.299 + p[i+1]*0.587 + p[i+2]*0.114)|0; p[i]=p[i+1]=p[i+2]=g; }
+      x.putImageData(d,0,0);
+      URL.revokeObjectURL(url); ok(c);
+    };
+    im.onerror = ()=>{ URL.revokeObjectURL(url); ko(new Error("Image illisible.")); };
+    im.src = url;
+  });
+}
+
+async function qHandle(file){
+  if(!file || !/^image\//.test(file.type||"")){ QZ.error = "Le fichier n'est pas une image (PNG, JPG…). Collez ou déposez la capture d'écran."; renderQcm(); return; }
+  QZ.busy = true; QZ.error = ""; QZ.status = "Préparation de l'image…"; renderQcm();
+  try{
+    const T = await loadTess();
+    const canvas = await qPrep(file);
+    if(!tessW){
+      qStatus("Chargement du module de lecture (première fois uniquement)…");
+      tessW = await T.createWorker("fra", 1, {logger: m=>{
+        if(m && m.status==="recognizing text") qStatus("Lecture de l'image… "+Math.round((m.progress||0)*100)+" %");
+      }});
+    }
+    qStatus("Lecture de l'image…");
+    const r = await tessW.recognize(canvas);
+    const max = S.session.type==="gaz" ? 20 : 40;
+    const res = qcmParse(r.data.text, max);
+    res.max = max; res.raw = r.data.text;
+    if(!res.items.length) throw new Error("Aucune ligne « date · nom · session · note » n'a été reconnue. Vérifiez que la capture montre bien le tableau des résultats, lisible et non coupé.");
+    qcmMatch(res.items, S.rows);
+    QZ.res = res; QZ.step = "review";
+  }catch(e){ QZ.error = e.message || String(e); QZ.step = "drop"; }
+  QZ.busy = false; renderQcm();
+}
+
+function qItemState(it){
+  if(it.match<0) return {k:"bad", t:"Non trouvé"};
+  if(it.problem) return {k:"bad", t:it.problem};
+  if(it.score<0.9) return {k:"warn", t:"À vérifier"};
+  return {k:"ok", t:"Sûr"};
+}
+function qDupes(){
+  const c={}; QZ.res.items.forEach(it=>{ if(it.match>=0) c[it.match]=(c[it.match]||0)+1; });
+  return Object.keys(c).filter(k=>c[k]>1).map(Number);
+}
+function renderQcm(){
+  const body = $("#qcmBody"), foot = $("#qcmFoot");
+  if(QZ.step==="drop"){
+    $("#qcmSub").textContent = "Collez (Ctrl+V) ou déposez la capture d'écran des résultats du QCM : les notes sont rapprochées des participants par nom et prénom.";
+    body.innerHTML = `
+      <div class="drop" id="qcmDrop">
+        <h3>${QZ.busy ? "Lecture en cours…" : "Collez la capture ici (Ctrl+V) ou déposez l'image"}</h3>
+        <p id="qcmStatus">${QZ.busy ? esc(QZ.status) : "ou choisissez le fichier image sur votre poste"}</p>
+        <button class="primary" id="qcmPick"${QZ.busy?" disabled":""}>Choisir une image</button>
+      </div>
+      ${QZ.error ? `<div class="msg err">${esc(QZ.error)}</div>` : ""}
+      <p class="hint">Le tableau doit contenir une ligne par stagiaire avec le nom, le prénom et la note. L'ordre nom / prénom et la casse n'ont pas d'importance. Rien n'est enregistré sans votre validation à l'étape suivante.</p>`;
+    foot.innerHTML = `<button id="qcmCancel" class="ghost">Annuler</button>`;
+    return;
+  }
+  const R = QZ.res, its = R.items, dup = qDupes();
+  $("#qcmSub").textContent = "Vérifiez les correspondances, corrigez si besoin, puis appliquez les notes.";
+  const sn = String(S.session.numero||"").replace(/\D/g,"");
+  const warns = [];
+  if(R.codes.length && sn && R.codes.indexOf(sn)<0)
+    warns.push("Le code session de la capture ("+R.codes.join(", ")+") ne correspond pas au n° de session de la feuille d'émargement ("+sn+"). Normal si les deux outils numérotent différemment ; sinon, vérifiez que c'est la bonne capture.");
+  if(R.codes.length>1) warns.push("La capture contient plusieurs codes de session ("+R.codes.join(", ")+").");
+  if(dup.length) warns.push("Plusieurs lignes de la capture sont rattachées au même participant : "+dup.map(j=>S.rows[j].nom+" "+S.rows[j].prenom).join(", ")+".");
+  const got = {}; its.forEach(it=>{ if(it.match>=0 && !it.problem) got[it.match]=1; });
+  const missing = S.rows.map((r,j)=>({r,j})).filter(o=>!got[o.j] && o.r.avis!=="A");
+  if(missing.length) warns.push("Participants sans note dans la capture : "+missing.map(o=>(o.r.nom+" "+o.r.prenom).trim()).join(", ")+".");
+  const nOk = its.filter(it=>it.match>=0 && !it.problem && it.note!=null).length;
+  body.innerHTML = `
+    ${warns.length ? `<div class="msg warn"><strong>À vérifier :</strong><ul>${warns.map(w=>`<li>${esc(w)}</li>`).join("")}</ul></div>` : `<div class="msg ok">Toutes les lignes ont été rapprochées d'un participant.</div>`}
+    <div class="tablewrap" style="margin-top:14px"><table class="grid-t">
+      <thead><tr><th>Lu sur la capture</th><th>Participant</th><th style="width:90px">Note /${R.max}</th><th style="width:130px">Statut</th></tr></thead>
+      <tbody>${its.map((it,i)=>{
+        const st = qItemState(it);
+        return `<tr>
+          <td>${esc(it.ocr)}</td>
+          <td><select data-q="m" data-i="${i}"><option value="-1">— ignorer cette ligne —</option>${S.rows.map((r,j)=>`<option value="${j}"${j===it.match?" selected":""}>${esc((r.nom+" "+r.prenom).trim())}</option>`).join("")}</select></td>
+          <td class="num"><input type="number" min="0" max="${R.max}" step="any" data-q="n" data-i="${i}" value="${it.note==null?"":esc(it.note)}"></td>
+          <td><span class="pill ${st.k==="ok"?"f":st.k==="warn"?"r":"d"}">${esc(st.t)}</span></td></tr>`;
+      }).join("")}</tbody></table></div>
+    <p class="hint">${nOk} note${nOk>1?"s":""} prête${nOk>1?"s":""} à être appliquée${nOk>1?"s":""}. Les lignes « non trouvé », « illisible » ou hors barème ne sont pas appliquées tant qu'elles ne sont pas corrigées. Une note déjà saisie est remplacée.</p>`;
+  foot.innerHTML = `<button id="qcmCancel" class="ghost">Annuler</button><button id="qcmBack" class="ghost">Autre capture</button><div class="spacer"></div><button id="qcmApply" class="primary"${nOk?"":" disabled"}>Appliquer ${nOk} note${nOk>1?"s":""}</button>`;
+}
+function openQcm(){
+  if(!S.rows.length){ alert("Aucun participant : importez d'abord la feuille d'émargement."); return; }
+  QZ = {step:"drop", busy:false, status:"", error:"", res:null};
+  $("#qcm").hidden = false; renderQcm();
+}
+function closeQcm(){ $("#qcm").hidden = true; }
+function qApply(){
+  let n=0, over=0;
+  QZ.res.items.forEach(it=>{
+    if(it.match<0 || it.problem || it.note==null) return;
+    const r = S.rows[it.match]; if(!r) return;
+    if(r.note!=="" && r.note!=null && +r.note!==+it.note) over++;
+    r.note = it.note; n++;
+  });
+  closeQcm(); refresh();
+  toast(n+" note"+(n>1?"s":"")+" QCM appliquée"+(n>1?"s":"")+(over?" ("+over+" remplacée"+(over>1?"s":"")+")":""));
+}
+document.addEventListener("click", e=>{
+  const t = e.target.closest("button"); if(!t) return;
+  switch(t.id){
+    case "btnQcm": openQcm(); break;
+    case "qcmPick": $("#fileQcm").click(); break;
+    case "qcmCancel": closeQcm(); break;
+    case "qcmBack": QZ.step="drop"; QZ.res=null; QZ.error=""; renderQcm(); break;
+    case "qcmApply": qApply(); break;
+  }
+});
+document.addEventListener("change", e=>{
+  const el = e.target;
+  if(el.id==="fileQcm" && el.files && el.files[0]){ qHandle(el.files[0]); el.value=""; return; }
+  if(el.dataset && el.dataset.q && QZ.res){
+    const it = QZ.res.items[+el.dataset.i];
+    if(el.dataset.q==="m"){ it.match = +el.value; it.score = it.match>=0 ? 1 : 0; }
+    else {
+      const v = el.value===""?null:parseFloat(el.value);
+      it.note = v;
+      it.problem = v==null ? "Note absente" : (v<0||v>QZ.res.max) ? "Hors barème (max "+QZ.res.max+")" : "";
+    }
+    renderQcm();
+  }
+});
+document.addEventListener("paste", e=>{
+  if($("#qcm").hidden || QZ.step!=="drop" || QZ.busy) return;
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  for(const it of items){ if(it.kind==="file" && /^image\//.test(it.type)){ e.preventDefault(); qHandle(it.getAsFile()); return; } }
+});
+["dragenter","dragover"].forEach(ev=>document.addEventListener(ev, e=>{
+  if($("#qcm").hidden) return; e.preventDefault();
+  const dz = $("#qcmDrop"); if(dz) dz.classList.add("hot");
+}));
+["dragleave","drop"].forEach(ev=>document.addEventListener(ev, e=>{
+  if($("#qcm").hidden) return; const dz = $("#qcmDrop"); if(dz) dz.classList.remove("hot");
+}));
+document.addEventListener("drop", e=>{
+  if($("#qcm").hidden || QZ.step!=="drop" || QZ.busy) return;
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if(f) qHandle(f);
+});
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && !$("#qcm").hidden) closeQcm(); });
+</script>
+
 <input type="file" id="fileSig" accept="image/*" hidden>
 
 <!-- ============ PAD DE SIGNATURE ============ -->
