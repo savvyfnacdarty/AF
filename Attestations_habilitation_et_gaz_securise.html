@@ -186,6 +186,7 @@ table.sy tbody td{height:7mm}
 .at .foot{font-size:7.5pt;text-align:center;margin-top:4mm;color:#333}
 
 /* — titre d'habilitation (masque Word) — */
+button[hidden]{display:none!important}
 .tt{padding-top:10mm}
 .tt .logo{display:block;width:46mm;margin:0 auto 5mm}
 table.tt-t{border-collapse:collapse;width:175mm;margin:0 auto;table-layout:fixed;font-size:9pt;line-height:1.35}
@@ -407,6 +408,7 @@ body:not(.locked) #authGate{display:none}
 <!-- ============ ATTESTATIONS ============ -->
 <section class="panel" id="p-attest" role="tabpanel" aria-labelledby="tab-attest">
   <div class="previewbar">
+    <button id="btnZipGaz" class="primary" hidden>Tout télécharger en PDF (.zip)</button>
     <button id="btnPdfAll" class="primary">Télécharger un PDF par participant</button>
     <button id="btnPdfMerge" class="ghost">Un seul PDF (toutes les attestations)</button>
     <button id="btnPrintAll" class="ghost">Imprimer</button>
@@ -423,7 +425,8 @@ body:not(.locked) #authGate{display:none}
   </div>
   <div id="titreLignes" style="margin-top:16px"></div>
   <div class="previewbar" style="margin-top:16px">
-    <button id="btnPdfTitres" class="primary">Télécharger un Word par participant</button>
+    <button id="btnZip" class="primary">Tout télécharger en PDF (.zip)</button>
+    <button id="btnPdfTitres" class="ghost">Télécharger un Word par participant</button>
     <button id="btnPdfTitresMerge" class="ghost">Un seul Word (tous les titres)</button>
     <button id="btnPrintTitres" class="ghost">Imprimer l'aperçu</button>
     <span class="hint" style="margin:0">Un titre est édité pour chaque avis favorable. Nom de fichier&nbsp;: <code>titre_prenom_nom.docx</code></span>
@@ -4328,6 +4331,171 @@ async function exportAllAttestations(){
   }
   toast(S.rows.length + " attestation" + (S.rows.length>1?"s":"") + " téléchargée" + (S.rows.length>1?"s":""));
 }
+/* ---------------- titre d'habilitation en PDF (jsPDF) ----------------
+   Même mise en page que l'aperçu : tableau de 175 mm, colonnes 23/17/20/20/20 %. */
+function pdfTitre(S, r, A, doc){
+  const d = doc || newDoc("portrait");
+  const T = titreData(S.session, r);
+  const X0 = 17.5, W = 175, PAD = 1.8, LH = lh(9, 1.3);
+  const cw = [23,17,20,20,20].map(p=>W*p/100);
+  const cx = [0]; cw.forEach((w,i)=>cx.push(cx[i]+w));
+  const pos = (a,b)=>[X0+cx[a], cx[b]-cx[a]];
+  const BLUE = [220,230,241], GREY = [217,217,217], WHITE = [255,255,255];
+  let y = 12;
+
+  /* logo */
+  const logoB64 = DOCX_TPL.media && DOCX_TPL.media["word/media/image1.png"];
+  if(logoB64){
+    const [lw, lhh] = pngDims(logoB64), w = 46, h = w*lhh/lw;
+    d.addImage("data:image/png;base64,"+logoB64, "PNG", 105 - w/2, y, w, h);
+    y += h + 5;
+  }
+
+  const need = (s, w, size, style) => { setF(d, size||9, style||"normal"); return d.splitTextToSize(String(s==null?"":s), w-2*PAD).length * lh(size||9, 1.3) + 2*PAD; };
+  const box = (a,b,yy,h,fill)=>{
+    const [x,w] = pos(a,b);
+    d.setFillColor(fill[0],fill[1],fill[2]); d.setDrawColor(0); d.setLineWidth(0.2);
+    d.rect(x, yy, w, h, "FD");
+  };
+  /* texte dans une cellule : valign "m" (centré) ou "t" (haut) */
+  const say = (a,b,yy,h,s,o)=>{
+    o = o || {};
+    const [x,w] = pos(a,b), size = o.size||9;
+    setF(d, size, o.style||"normal");
+    const c = o.color||[0,0,0]; d.setTextColor(c[0],c[1],c[2]);
+    const lines = d.splitTextToSize(String(s==null?"":s), w-2*PAD);
+    const H = lh(size, 1.3), tot = lines.length*H;
+    let ty = o.valign==="t" ? yy+PAD : yy + (h - tot)/2;
+    lines.forEach(ln=>{
+      const al = o.align||"left";
+      d.text(ln, al==="center" ? x+w/2 : x+PAD, ty, {align:al, baseline:"top"});
+      ty += H;
+    });
+  };
+  /* « Libellé : valeur » avec la valeur en gras (et éventuellement colorée) */
+  const say2 = (a,b,yy,h,label,val,vcolor)=>{
+    const [x] = pos(a,b);
+    setF(d, 9, "normal"); d.setTextColor(0,0,0);
+    const ty = yy + (h - lh(9,1))/2;
+    d.text(label, x+PAD, ty, {baseline:"top"});
+    const lw = d.getTextWidth(label);
+    setF(d, 9, "bold"); const c = vcolor||[0,0,0]; d.setTextColor(c[0],c[1],c[2]);
+    d.text(String(val==null?"":val), x+PAD+lw, ty, {baseline:"top"});
+  };
+  const cell = (a,b,yy,h,fill,s,o)=>{ box(a,b,yy,h,fill); if(s!=null && s!=="") say(a,b,yy,h,s,o); };
+  const wid = (a,b)=>pos(a,b)[1];
+  const row = (h, fn)=>{ fn(y,h); y += h; };
+
+  /* titre */
+  row(lh(14,1.3)+8, (yy,h)=>cell(0,5,yy,h,GREY,"TITRE D'HABILITATION ELECTRIQUE",{size:14,style:"bold",align:"center"}));
+  row(7.5, (yy,h)=>cell(0,5,yy,h,BLUE,T.employeur));
+
+  /* nom / prénom + affectation (2 lignes) */
+  const hN = 7.5;
+  box(2,5,y,hN*2,BLUE);
+  say(2,5,y,hN*2,[T.affect1,T.affect2].filter(Boolean).join("\n"),{valign:"t"});
+  row(hN, (yy,h)=>{ box(0,2,yy,h,BLUE); say2(0,2,yy,h,"Nom : ",T.nom); });
+  row(hN, (yy,h)=>{ box(0,2,yy,h,BLUE); say2(0,2,yy,h,"Prénom : ",T.prenom); });
+  row(7.5, (yy,h)=>cell(0,5,yy,h,BLUE,T.fonction));
+
+  /* formation / organisme */
+  const hF = Math.max(8.5, need("Formation délivrée le :", wid(0,1)), need("Nom de l'organisme de formation : "+T.organisme, wid(2,5)));
+  row(hF, (yy,h)=>{
+    cell(0,1,yy,h,WHITE,"Formation délivrée le :");
+    cell(1,2,yy,h,WHITE,T.dateForm,{align:"center"});
+    cell(2,5,yy,h,WHITE,"Nom de l'organisme de formation : "+T.organisme);
+  });
+  row(8.5, (yy,h)=>{
+    box(0,2,yy,h,WHITE); say2(0,2,yy,h,"Avis émis : ",T.avis,[192,0,0]);
+    cell(2,5,yy,h,WHITE,"CHAMPS D'APPLICATION",{align:"center"});
+  });
+  const HEADS = ["Personnel","Symbole d'habilitation","Domaine de tension","Ouvrages concernés","Indications supplémentaires"];
+  row(Math.max(8, ...HEADS.map((t,i)=>need(t, wid(i,i+1)))), (yy,h)=>{
+    HEADS.forEach((t,i)=>cell(i,i+1,yy,h,GREY,t,{align:"center"}));
+  });
+
+  /* 4 lignes de champs d'application */
+  T.lignes.forEach(L=>{
+    const h = Math.max(14, need(L.personnel, wid(0,1)), need(L.symbole, wid(1,2), 16, "bold"),
+      need(L.tension, wid(2,3)), need(L.ouvrages, wid(3,4)), need(L.indications, wid(4,5)));
+    row(h, (yy,hh)=>{
+      cell(0,1,yy,hh,GREY,L.personnel,{align:"center"});
+      cell(1,2,yy,hh,GREY,L.symbole,{align:"center",style:"bold",size:16});
+      cell(2,3,yy,hh,GREY,L.tension,{valign:"t"});
+      cell(3,4,yy,hh,GREY,L.ouvrages,{valign:"t"});
+      cell(4,5,yy,hh,GREY,L.indications,{valign:"t"});
+    });
+  });
+
+  /* autorisations */
+  const aut = "Autorisations ou interdictions spéciales :\n" + [T.autorisations, T.mention].filter(Boolean).join("\n");
+  row(Math.max(16, need(aut, W)), (yy,h)=>cell(0,5,yy,h,GREY,aut,{valign:"t"}));
+
+  /* titulaire / employeur */
+  row(7.5, (yy,h)=>{ cell(0,2,yy,h,WHITE,"Le titulaire :"); cell(2,5,yy,h,WHITE,"Pour l'employeur, nom et prénom :"); });
+  row(8, (yy,h)=>{ cell(0,2,yy,h,BLUE,T.titulaire,{align:"center",style:"bold"}); cell(2,5,yy,h,BLUE,T.empNom); });
+  const hE1 = Math.max(7.5, need("Fonction : "+T.empFonction, wid(2,4))), hE2 = 7.5;
+  box(0,2,y,hE1+hE2,BLUE);
+  row(hE1, (yy,h)=>{ cell(2,4,yy,h,BLUE,"Fonction : "+T.empFonction); cell(4,5,yy,h,BLUE,"Date : "+T.dateSig); });
+  row(hE2, (yy,h)=>cell(2,5,yy,h,WHITE,"Validité du titre : "+T.validite));
+
+  /* signatures */
+  row(7, (yy,h)=>{ cell(0,2,yy,h,GREY,"Signature",{align:"center"}); cell(2,5,yy,h,GREY,"Signature",{align:"center"}); });
+  const hS = 22;
+  row(hS, (yy,h)=>{
+    box(0,2,yy,h,BLUE); box(2,5,yy,h,BLUE);
+    const sg = titreSig(S.session);
+    if(!sg.vide){
+      const [sw, sh] = pngDims(sg.b64), [sx, sW] = pos(2,5);
+      const ih = Math.min(18, (sW-6)*sh/sw), iw = ih*sw/sh;
+      try{ d.addImage("data:image/png;base64,"+sg.b64, "PNG", sx + sW/2 - iw/2, yy+2, iw, ih); }catch(e){}
+    }
+  });
+  return d;
+}
+function pdfTitres(S, rows, A){
+  const d = newDoc("portrait");
+  rows.forEach((r,i)=>{ if(i) d.addPage("a4","portrait"); pdfTitre(S, r, A, d); });
+  return d;
+}
+
+/* ---------------- dernière étape : archive .zip de tous les PDF ----------------
+   Tableau de synthèse + attestations (+ titres d'habilitation en électrique),
+   tous en PDF, rangés par dossier. Nom : « n° de session _ date de session ». */
+function pdfBytes(d){ return new Uint8Array(d.output("arraybuffer")); }
+function zipBaseName(){
+  const s = S.session;
+  const num = slug(s.numero) || "sans_numero";
+  const dt = String(s.dateDebut || s.dateFin || todayISO()).slice(0,10);
+  return num + "_" + dt;
+}
+function exportZip(){
+  if(!S.rows.length){ alert("Aucun participant."); return; }
+  const g = S.session.type==="gaz", A = assets(), files = [], used = {};
+  const uniq = (dir, base)=>{
+    let n = base, k = 2;
+    while(used[dir+n]) n = base + "_" + (k++);
+    used[dir+n] = 1; return n;
+  };
+  try{
+    files.push({name:"Tableau_synthese/synthese_session_" + fileBase() + ".pdf", data:pdfBytes(pdfSynthese(S, A))});
+    S.rows.forEach(r=>{
+      const base = uniq("A/", (slug(r.prenom)+"_"+slug(r.nom)).replace(/^_|_$/g,"") || "participant");
+      files.push({name:"Attestations/" + base + ".pdf", data:pdfBytes(pdfAttestation(S, r, A))});
+    });
+    let nt = 0;
+    if(!g){
+      rowsTitre().forEach(r=>{
+        const base = uniq("T/", "titre_" + ((slug(r.prenom)+"_"+slug(r.nom)).replace(/^_|_$/g,"") || "participant"));
+        files.push({name:"Titres_habilitation/" + base + ".pdf", data:pdfBytes(pdfTitre(S, r, A))});
+        nt++;
+      });
+    }
+    saveBlob(zipStore(files, "application/zip"), zipBaseName() + ".zip");
+    toast("Archive « " + zipBaseName() + ".zip » : 1 synthèse, " + S.rows.length + " attestation" + (S.rows.length>1?"s":"") + (g ? "" : ", " + nt + " titre" + (nt>1?"s":"")));
+  }catch(e){ alert("Génération de l'archive impossible : " + (e && e.message ? e.message : e)); }
+}
+
 function exportMerged(){
   if(!S.rows.length){ alert("Aucun participant."); return; }
   const d = pdfAttestations(S, S.rows, assets());
@@ -4538,6 +4706,7 @@ function syncOptions(){
   const g = S.session.type==="gaz";
   const grp = $("#grpTypeAll"); if(grp) grp.hidden = g;
   $("#tab-titres").hidden = g;
+  const bz = $("#btnZipGaz"); if(bz) bz.hidden = !g;
   if(g && $("#tab-titres").getAttribute("aria-selected")==="true") setTab("saisie");
 }
 function refresh(){ renderSession(); renderTable(); renderSignatures(); renderTitres(); syncOptions(); save(); }
@@ -4613,6 +4782,7 @@ document.addEventListener("click", e=>{
     case "btnPdfAll": exportAllAttestations(); break;
     case "btnPdfMerge": exportMerged(); break;
     case "btnPrintAll": doPrint(S.rows.map(attest).join(""),"portrait","attestations_session_"+fileBase()); break;
+    case "btnZip": case "btnZipGaz": exportZip(); break;
     case "btnPdfTitres": exportAllTitres(); break;
     case "btnPdfTitresMerge": exportMergedTitres(); break;
     case "btnPrintTitres": {
