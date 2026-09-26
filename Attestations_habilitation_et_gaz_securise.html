@@ -3139,6 +3139,9 @@ function docxTitres(S, rows){
      ordinaire glisserait en bas de page et laisserait une page blanche entre deux titres */
   const PAGE = '<w:p><w:pPr><w:pageBreakBefore/><w:spacing w:after="0" w:line="20" w:lineRule="exact"/>'
              + '<w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>';
+  /* signature du signataire choisi : remplace l'image du masque et ajuste son cadre */
+  const SG = titreSig(S.session);
+  const TBL = T.tbl.replace(/cx="1386960" cy="579170"/g, `cx="${SG.cx}" cy="${SG.cy}"`);
   const body = rows.map(r=>{
     const t = titreData(S.session, r);
     const map = {
@@ -3159,12 +3162,12 @@ function docxTitres(S, rows){
     /* la mention « sous réserves » est portée dans la cellule « Autorisations »
        plutôt qu'en paragraphe séparé : le tableau remplit la page, un paragraphe
        de plus rejetterait la mention seule sur une page blanche. */
-    return T.tbl.replace(/\{\{([A-Z0-9]+)\}\}/g, (m,k)=> map[k]!=null ? xval(map[k]) : "");
+    return TBL.replace(/\{\{([A-Z0-9]+)\}\}/g, (m,k)=> map[k]!=null ? xval(map[k]) : "");
   }).join(PAGE);
 
   const files = [{name:"[Content_Types].xml", data:T.parts["[Content_Types].xml"]}];
   Object.keys(T.parts).forEach(n=>{ if(n!=="[Content_Types].xml") files.push({name:n, data:T.parts[n]}); });
-  Object.keys(T.media || {}).forEach(n=> files.push({name:n, data:b64bytes(T.media[n])}));
+  Object.keys(T.media || {}).forEach(n=> files.push({name:n, data:b64bytes(n==="word/media/image2.png" ? SG.b64 : T.media[n])}));
   files.push({name:"word/document.xml", data:T.prefix + body + T.suffix});
   return zipStore(files, DOCX_MIME);
 }
@@ -3182,6 +3185,30 @@ function saveBlob(blob, name){
    ========================================================================== */
 let LOGO = "";   /* chargé après connexion (Firestore) */
 let STAMP = "";  /* chargé après connexion (Firestore) */
+let SIGN_IMGS = {};   /* chargé après connexion (Firestore, document secure/signatures) */
+/* ---- Signataires du titre d'habilitation (pour l'employeur) ---- */
+const SIGNATAIRES = [
+  {id:"DA", nom:"David ABECASSIS",   fonction:"Directeur des Ressources Humaines Opérations"},
+  {id:"SF", nom:"Stéphanie FELDMAN", fonction:"Directrice des Ressources Humaines Opérations"}
+];
+const PNG_VIDE = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=";
+const SIG_BOX = [1386960, 579170];   /* emplacement de la signature dans le masque Word (EMU) */
+function pngDims(b64){
+  try{
+    const b = atob(String(b64).slice(0,32));
+    const n = i => ((b.charCodeAt(i)<<24)|(b.charCodeAt(i+1)<<16)|(b.charCodeAt(i+2)<<8)|b.charCodeAt(i+3))>>>0;
+    const w = n(16), h = n(20);
+    return (w>0 && h>0) ? [w,h] : [182,76];
+  }catch(e){ return [182,76]; }
+}
+/* signature retenue pour le titre : image PNG en base64 + dimensions ajustées à l'emplacement */
+function titreSig(s){
+  const id = s.titreSignataire || "DA";
+  const b64 = id==="autre" ? String(s.titreSigCustom||"").replace(/^data:image\/png;base64,/,"") : (SIGN_IMGS[id] || "");
+  if(!b64) return {b64:PNG_VIDE, cx:SIG_BOX[0], cy:SIG_BOX[1], vide:true};
+  const [w,h] = pngDims(b64), k = Math.min(SIG_BOX[0]/w, SIG_BOX[1]/h);
+  return {b64, cx:Math.round(w*k), cy:Math.round(h*k), vide:false};
+}
 const STAMP_RATIO = 2.8481;
 const KEY = "fd-attestations-v2";
 
@@ -3230,6 +3257,7 @@ function blankSession(){
     titreOuvrages:"Tous les chantiers et tous les sites Fnac, Darty et Nature & découverte en France",
     titreIndications:"Autorisé à effectuer des interventions sur les circuits HT des équipements des domaines BT et TBT",
     titreAutorisations:"Doit disposer d'équipements de protection individuelle et d'outils de vérification d'absence de tension",
+    titreSignataire:"DA", titreSigCustom:"",
     titreEmpNom:"David ABECASSIS",
     titreEmpFonction:"Directeur des Ressources Humaines Opérations",
     titreDateSig:"", titreDuree:"3",
@@ -3329,6 +3357,11 @@ function normalize(d){
   if(old.titreInfos != null && !old.titreAutorisations)
     sess.titreAutorisations = old.titreInfos;
   if(!Array.isArray(sess.titreLignes) || sess.titreLignes.length!==4) sess.titreLignes = null;
+  if(!old.titreSignataire){   /* session enregistrée avant les signataires */
+    const m = SIGNATAIRES.find(x=>x.nom===sess.titreEmpNom);
+    sess.titreSignataire = m ? m.id : (CLEAN(sess.titreEmpNom) ? "autre" : "DA");
+  }
+  if(sess.titreSignataire!=="autre" && !SIGNATAIRES.some(x=>x.id===sess.titreSignataire)) sess.titreSignataire = "DA";
   return {
     session: sess,
     rows: (d.rows||[]).map(r=>{
@@ -3817,7 +3850,8 @@ const NL = s => esc(s).replace(/\r?\n/g,"<br>");
 function titreHTML(r){
   const T = titreData(S.session, r);
   const logo = tplImage("word/media/image1.png");
-  const sig  = tplImage("word/media/image2.png");
+  const sg = titreSig(S.session);
+  const sig = sg.vide ? "" : "data:image/png;base64," + sg.b64;
   return `<div class="doc portrait tt">
     ${logo?`<img class="logo" src="${logo}" alt="Fnac Darty">`:""}
     <table class="tt-t">
@@ -3876,8 +3910,10 @@ function titreFieldsDef(){
   return [
     {k:"employeur",l:"Société (si le participant n'a pas de filiale)"},
     {k:"titreOrganisme",l:"Organisme de formation",ph:S.session.organisme||""},
+    {k:"titreSignataire",l:"Signataire (pour l'employeur)",t:"signataire"},
     {k:"titreEmpNom",l:"Pour l'employeur — nom et prénom"},
     {k:"titreEmpFonction",l:"Pour l'employeur — fonction"},
+    {k:"titreSigCustom",l:"Signature de cette personne (image, facultatif)",t:"sigfile"},
     {k:"titreDateSig",l:"Date de signature (vide = date du jour)",t:"date"},
     {k:"titreDuree",l:"Validité (années)"},
     {k:"titreTension",l:"Domaine de tension (une valeur par ligne)",t:"textarea"},
@@ -3889,10 +3925,18 @@ function titreFieldsDef(){
 function renderTitres(){ renderTitreFields(); renderTitreLignes(); renderTitreDocs(); }
 function renderTitreFields(){
   $("#titreFields").innerHTML = titreFieldsDef().map(f=>{
+    const cur = S.session.titreSignataire || "DA";
+    if(f.t==="signataire")
+      return `<label class="f">${esc(f.l)}<select data-sign="1">${SIGNATAIRES.map(x=>`<option value="${x.id}"${cur===x.id?" selected":""}>${esc(x.nom)}</option>`).join("")}<option value="autre"${cur==="autre"?" selected":""}>Autre personne…</option></select>${cur!=="autre" && !SIGN_IMGS[cur] ? `<span class="hint" style="margin:4px 0 0">Signature indisponible : l'espace restera vide.</span>` : ""}</label>`;
+    if(f.t==="sigfile"){
+      if(cur!=="autre") return "";
+      return `<label class="f">${esc(f.l)}<input type="file" accept="image/*" data-sigfile="1">${S.session.titreSigCustom ? `<span class="hint" style="margin:4px 0 0">Signature chargée — <a href="#" data-sigclear="1">retirer</a></span>` : `<span class="hint" style="margin:4px 0 0">Sans image, l'espace reste vide pour une signature manuscrite.</span>`}</label>`;
+    }
+    const ro = (f.k==="titreEmpNom" || f.k==="titreEmpFonction") && cur!=="autre";
     const v = esc(S.session[f.k]);
     const ctl = f.t==="textarea"
       ? `<textarea data-s="${f.k}" rows="3">${v}</textarea>`
-      : `<input type="${f.t==="date"?"date":"text"}" data-s="${f.k}" value="${v}"${f.ph?` placeholder="${esc(f.ph)}"`:""}>`;
+      : `<input type="${f.t==="date"?"date":"text"}" data-s="${f.k}" value="${v}"${f.ph?` placeholder="${esc(f.ph)}"`:""}${ro?" readonly":""}>`;
     return `<label class="f"${f.t==="textarea"?' style="grid-column:span 2"':""}>${esc(f.l)}${ctl}</label>`;
   }).join("");
 }
@@ -4330,6 +4374,38 @@ document.addEventListener("click", e=>{
   }
 });
 
+/* signataire du titre : liste déroulante + « Autre personne… » */
+document.addEventListener("change", e=>{
+  const el = e.target;
+  if(el.dataset && el.dataset.sign!=null){
+    const se = S.session, p = SIGNATAIRES.find(x=>x.id===el.value);
+    se.titreSignataire = p ? p.id : "autre";
+    se.titreEmpNom = p ? p.nom : "";
+    se.titreEmpFonction = p ? p.fonction : "";
+    save(); renderTitreFields(); renderTitreDocs();
+    return;
+  }
+  if(el.dataset && el.dataset.sigfile!=null && el.files && el.files[0]){
+    const rd = new FileReader();
+    rd.onload = ()=>{
+      const im = new Image();
+      im.onload = ()=>{
+        const k = Math.min(1, 700/im.width), c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(im.width*k)); c.height = Math.max(1, Math.round(im.height*k));
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        S.session.titreSigCustom = c.toDataURL("image/png");
+        save(); renderTitreFields(); renderTitreDocs();
+      };
+      im.onerror = ()=> alert("Image illisible : choisissez un fichier PNG ou JPG.");
+      im.src = rd.result;
+    };
+    rd.readAsDataURL(el.files[0]);
+  }
+});
+document.addEventListener("click", e=>{
+  const a = e.target.closest && e.target.closest("[data-sigclear]");
+  if(a){ e.preventDefault(); S.session.titreSigCustom = ""; save(); renderTitreFields(); renderTitreDocs(); }
+});
 document.addEventListener("input", e=>{
   const el = e.target;
   if(el.dataset.s!=null){
@@ -4476,6 +4552,9 @@ window.__bootApp = function boot(){
   refresh();
   openWizard();               // le fichier s'ouvre toujours sur une nouvelle session
 };
+window.__setSignatures = function(d){
+  SIGN_IMGS = {DA:(d&&d.DA)||"", SF:(d&&d.SF)||""};
+};
 window.__setAssets = function(a){
   LOGO = a.logo; STAMP = a.stamp; DOCX_TPL = JSON.parse(a.docxTpl);
 };
@@ -4551,6 +4630,10 @@ if(firebaseConfig.apiKey.startsWith("REMPLACER")){
       const snap = await getDoc(doc(db, "secure", "assets"));
       if(!snap.exists()) throw Object.assign(new Error("assets-missing"), {code: "assets-missing"});
       window.__setAssets(snap.data());
+      try{   /* signatures des signataires : document facultatif, l'outil démarre sans */
+        const sg = await getDoc(doc(db, "secure", "signatures"));
+        if(sg.exists()) window.__setSignatures(sg.data());
+      }catch(e){ /* pas de signature disponible : espace laissé vide */ }
       if(!booted){ booted = true; window.__bootApp(); }
       const tb = document.querySelector(".toolbar");
       if(tb && !$g("btnLogout")){
