@@ -50,6 +50,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 header.top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 20px;border-bottom:2px solid var(--ink);padding-bottom:12px}
 .brand{display:flex;align-items:center;gap:12px}
 .brand img{width:56px;height:auto;display:block}
+.brand a{display:block;line-height:0}
+.brand a:hover img{opacity:.85}
 .brand h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em}
 .brand h1 .appver{font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--muted);border:1px solid var(--muted);border-radius:10px;padding:1px 7px;margin-left:8px;vertical-align:middle}
 .brand p{margin:2px 0 0;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.09em}
@@ -81,6 +83,8 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(-
 .grid{display:grid;gap:12px 14px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-family:var(--font-ui);font-weight:600}
 label.f input,label.f select,label.f textarea{background:var(--surface-2);border:1px solid var(--line-strong);border-radius:5px;padding:6px 8px;font-size:13.5px;font-family:var(--font-body);letter-spacing:normal;text-transform:none;color:var(--ink);min-width:0}
+label.f.champ-manquant{color:#dc2626}
+label.f.champ-manquant input,label.f.champ-manquant select{border-color:#dc2626;background:#fef2f2}
 label.f input:hover,label.f select:hover{border-color:var(--ink-2)}
 .seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden}
 .seg button{border:none;border-radius:0;background:var(--surface-2);padding:7px 14px}
@@ -303,7 +307,7 @@ body:not(.locked) #authGate{display:none}
 <div class="wrap">
 <header class="top">
   <div class="brand">
-    <img id="brandLogo" alt="Académie Fnac Darty">
+    <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty"></a>
     <div>
       <h1>Attestations de formation <span id="appVersion" class="appver">v6.3</span></h1>
       <p>Habilitation électrique &amp; Règles de sécurité gaz</p>
@@ -4558,6 +4562,8 @@ function renderWizard(){
     steps.innerHTML = "<span>1 · Émargement</span> <b>2 · Vérification</b>";
     $("#wizSub").textContent = "Vérifiez ce qui a été lu sur la feuille, puis créez la session.";
     const g = p.form.type==="gaz";
+      const M = p.res.missing || [];
+      const mc = k => M.includes(k) ? " champ-manquant" : "";
     body.innerHTML = `
       ${(p.res.errors && p.res.errors.length) ? `<div class="msg err"><strong>Données obligatoires manquantes :</strong><ul>${p.res.errors.map(w=>`<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
       ${p.res.warnings.length ? `<div class="msg warn"><strong>À vérifier :</strong><ul>${p.res.warnings.map(w=>`<li>${esc(w)}</li>`).join("")}</ul></div>`
@@ -4570,12 +4576,12 @@ function renderWizard(){
           <option value="gaz"${g?" selected":""}>Règles de sécurité gaz</option></select></label>
         ${g?"":`<label class="f">Titre d'habilitation<select id="wHab">${habOptions(p.form.habilitation).map(h=>`<option${h===p.form.habilitation?" selected":""}>${esc(h)}</option>`).join("")}</select></label>`}
         ${g?"":`<label class="f">Type de formation (tous les participants)<select id="wTypeForm">${["Initiale","Recyclage"].map(o=>`<option${o===p.form.defautType?" selected":""}>${o}</option>`).join("")}</select></label>`}
-        <label class="f">Intitulé lu sur la feuille<input id="wIntitule" value="${esc(p.form.intitule)}"></label>
-        <label class="f">N° / code de session<input id="wNumero" value="${esc(p.form.numero)}"></label>
-        <label class="f">Date<input type="date" id="wDate" value="${esc(p.form.dateDebut)}"></label>
-        <label class="f">Lieu du stage<input id="wLieu" value="${esc(p.form.lieu)}"></label>
-        <label class="f">Durée (h)<input id="wDuree" value="${esc(p.form.duree)}"></label>
-        <label class="f">Formateur<input id="wFormateur" value="${esc(p.form.formateur)}"></label>
+        <label class="f${mc('intitulé')}">Intitulé lu sur la feuille<input id="wIntitule" value="${esc(p.form.intitule)}"></label>
+        <label class="f${mc('n° de session')}">N° / code de session<input id="wNumero" value="${esc(p.form.numero)}"></label>
+        <label class="f${mc('date')}">Date<input type="date" id="wDate" value="${esc(p.form.dateDebut)}"></label>
+        <label class="f${mc('lieu')}">Lieu du stage<input id="wLieu" value="${esc(p.form.lieu)}"></label>
+        <label class="f${mc('durée')}">Durée (h)<input id="wDuree" value="${esc(p.form.duree)}"></label>
+        <label class="f${mc('formateur')}">Formateur<input id="wFormateur" value="${esc(p.form.formateur)}"></label>
       </div>
       <div class="bar" style="margin:0 0 10px">
         <strong style="font-family:var(--font-ui);font-size:13px">Participants lus (${p.rows.length})</strong>
@@ -4641,6 +4647,13 @@ async function handlePdf(file){
   }
 }
 
+document.addEventListener("input", e=>{
+  const el = e.target;
+  if(["wIntitule","wNumero","wDate","wLieu","wDuree","wFormateur"].indexOf(el.id)>=0 && el.value.trim()){
+    const lbl = el.closest("label.f");
+    if(lbl) lbl.classList.remove("champ-manquant");
+  }
+});
 function syncWizForm(){
   if(!WZ.parsed || WZ.step!=="review" || !$("#wType")) return;
   Object.assign(WZ.parsed.form, {
