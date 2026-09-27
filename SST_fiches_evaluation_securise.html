@@ -17,6 +17,11 @@ body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-ap
 header{padding:18px 20px 6px;max-width:1300px;margin:0 auto}
 h1{margin:0;font-size:22px}
 header p{margin:4px 0 0;color:var(--muted)}
+.brand{display:flex;align-items:center;gap:12px}
+.brand a{display:block;line-height:0}
+.brand a:hover img{opacity:.85}
+.brand img{width:56px;height:auto;display:block}
+
 main{max-width:1300px;margin:0 auto;padding:12px 20px 40px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
 @media (max-width:980px){main{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
@@ -110,8 +115,13 @@ body:not(.locked) #authGate{display:none}
 </div>
 
 <header>
-  <h1>Documents SST</h1>
-  <p>Importez la feuille d’émargement, vérifiez les participants, puis générez les PDF de chaque étape.</p>
+  <div class="brand">
+    <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty" hidden></a>
+    <div>
+      <h1>Documents SST</h1>
+      <p>Importez la feuille d’émargement, vérifiez les participants, puis générez les PDF de chaque étape.</p>
+    </div>
+  </div>
 </header>
 <nav id="stepnav" role="tablist" aria-label="Étapes">
   <button role="tab" data-s="1" class="on" aria-selected="true">1 · Fiches d’évaluation formative</button>
@@ -1567,7 +1577,7 @@ function imgRatio(u, dflt){                          /* lit la taille dans l'en-
 }
 /* version sécurisée : logo et cachet arrivent de Firestore après connexion */
 window.__onSecure = r=>{ window.__setSstAssets(r.assets.logo, r.sst.cachet); };
-window.__setSstAssets = (logo, cachet)=>{ LOGO_ACAD=logo; CACHET=cachet; LR.acad=imgRatio(logo,LR.acad); LR.cachet=imgRatio(cachet,LR.cachet); if (typeof refresh==="function") refresh(); };
+window.__setSstAssets = (logo, cachet)=>{ LOGO_ACAD=logo; CACHET=cachet; LR.acad=imgRatio(logo,LR.acad); LR.cachet=imgRatio(cachet,LR.cachet); const bl=document.getElementById("brandLogo"); if(bl && logo){ bl.src=logo; bl.hidden=false; } if (typeof refresh==="function") refresh(); };
 const RED = [227,6,19], BAR_Y = [233,170,0];
 
 /* compétences visées : texte + grille(s) dont elles dépendent */
