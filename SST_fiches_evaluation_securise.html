@@ -1887,6 +1887,22 @@ function human(e){
       import("https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore-lite.js")]);
   }catch(e){ showWait("Connexion impossible : cet outil demande un accès internet. Vérifiez votre réseau puis rechargez la page."); return; }
   const app = A.initializeApp(firebaseConfig), auth = Au.getAuth(app), db = F.getFirestore(app);
+  /* Expiration de session : reconnexion demandée si la connexion date de la veille ou de plus de SESSION_MAX_H heures */
+  const SESSION_MAX_H = 10, SESSION_MEME_JOUR = true;
+  async function sessionExpiree(user){
+    try{
+      const t = await Au.getIdTokenResult(user), c = new Date(t.authTime), n = new Date();
+      if(isNaN(c)) return false;
+      return (n - c) > SESSION_MAX_H * 3600e3 || (SESSION_MEME_JOUR && c.toDateString() !== n.toDateString());
+    }catch(e){ return false; }
+  }
+  async function verifierSession(){
+    const u = auth.currentUser;
+    if(u && await sessionExpiree(u)){ lastError = "Session expirée : veuillez vous reconnecter."; await Au.signOut(auth); }
+  }
+  setInterval(verifierSession, 5 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) verifierSession(); });
+
   form.addEventListener("submit", async ev => {
     ev.preventDefault(); go.disabled = true; msg.textContent = "";
     try{ await Au.signInWithEmailAndPassword(auth, $g("authEmail").value.trim(), $g("authPass").value); }
@@ -1900,6 +1916,7 @@ function human(e){
   });
   Au.onAuthStateChanged(auth, async user => {
     if(!user){ document.body.classList.add("locked"); showForm(); return; }
+    if(await sessionExpiree(user)){ lastError = "Session expirée : veuillez vous reconnecter."; await Au.signOut(auth); return; }
     showWait("Chargement des ressources…");
     try{
       const snap = await F.getDoc(F.doc(db, "secure", "assets"));

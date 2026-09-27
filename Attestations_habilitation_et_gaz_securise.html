@@ -5000,7 +5000,7 @@ window.__setAssets = function(a){
    (document secure/assets) et seuls les comptes autorisés par les règles y accèdent.
    ========================================================================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail }
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, getIdTokenResult }
   from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 import { getFirestore, doc, getDoc }
   from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore-lite.js";
@@ -5043,6 +5043,22 @@ if(firebaseConfig.apiKey.startsWith("REMPLACER")){
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app), db = getFirestore(app);
 
+  /* Expiration de session : reconnexion demandée si la connexion date de la veille ou de plus de SESSION_MAX_H heures */
+  const SESSION_MAX_H = 10, SESSION_MEME_JOUR = true;
+  async function sessionExpiree(user){
+    try{
+      const t = await getIdTokenResult(user), c = new Date(t.authTime), n = new Date();
+      if(isNaN(c)) return false;
+      return (n - c) > SESSION_MAX_H * 3600e3 || (SESSION_MEME_JOUR && c.toDateString() !== n.toDateString());
+    }catch(e){ return false; }
+  }
+  async function verifierSession(){
+    const u = auth.currentUser;
+    if(u && await sessionExpiree(u)){ lastError = "Session expirée : veuillez vous reconnecter."; await signOut(auth); }
+  }
+  setInterval(verifierSession, 5 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) verifierSession(); });
+
   form.addEventListener("submit", async ev => {
     ev.preventDefault(); go.disabled = true; msg.textContent = "";
     try{ await signInWithEmailAndPassword(auth, $g("authEmail").value.trim(), $g("authPass").value); }
@@ -5057,6 +5073,7 @@ if(firebaseConfig.apiKey.startsWith("REMPLACER")){
 
   onAuthStateChanged(auth, async user => {
     if(!user){ document.body.classList.add("locked"); showForm(); return; }
+    if(await sessionExpiree(user)){ lastError = "Session expirée : veuillez vous reconnecter."; await signOut(auth); return; }
     showWait("Chargement des ressources…");
     try{
       const snap = await getDoc(doc(db, "secure", "assets"));
