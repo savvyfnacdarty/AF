@@ -289,6 +289,11 @@ body:not(.locked) #authGate{display:none}
   color:var(--muted);font:inherit;font-size:13px;text-decoration:underline}
 #authGate .msg{min-height:20px;margin:12px 0 0;font-size:13px;color:var(--bad)}
 #authGate .msg.info{color:var(--ink-2)}
+
+/* ---- champs à renseigner : mise en évidence en rouge ---- */
+.vide{border-color:var(--bad)!important;background:var(--bad-soft)!important;box-shadow:0 0 0 1px var(--bad)}
+label.f:has(.vide){color:var(--bad)}
+#videInfo{color:var(--bad);font-weight:600;font-size:13px;margin-left:12px}
 </style>
 
 <body class="locked">
@@ -309,7 +314,7 @@ body:not(.locked) #authGate{display:none}
   <div class="brand">
     <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty"></a>
     <div>
-      <h1>Attestations de formation <span id="appVersion" class="appver">v6.3</span></h1>
+      <h1>Attestations de formation <span id="appVersion" class="appver">v6.4</span></h1>
       <p>Habilitation électrique &amp; Règles de sécurité gaz</p>
     </div>
   </div>
@@ -3474,7 +3479,7 @@ function pngDims(b64){
 }
 /* signature retenue pour le titre : image PNG en base64 + dimensions ajustées à l'emplacement */
 function titreSig(s){
-  const id = s.titreSignataire || "DA";
+  const id = s.titreSignataire || "";
   const b64 = id==="autre" ? String(s.titreSigCustom||"").replace(/^data:image\/png;base64,/,"") : (SIGN_IMGS[id] || "");
   if(!b64) return {b64:PNG_VIDE, cx:SIG_BOX[0], cy:SIG_BOX[1], vide:true};
   const [w,h] = pngDims(b64), k = Math.min(SIG_BOX[0]/w, SIG_BOX[1]/h);
@@ -3542,9 +3547,9 @@ function blankSession(){
     titreOuvrages:"Tous les chantiers et tous les sites Fnac, Darty et Nature & découverte en France",
     titreIndications:"Autorisé à effectuer des interventions sur les circuits HT des équipements des domaines BT et TBT",
     titreAutorisations:"Doit disposer d'équipements de protection individuelle et d'outils de vérification d'absence de tension",
-    titreSignataire:"DA", titreSigCustom:"",
-    titreEmpNom:"David ABECASSIS",
-    titreEmpFonction:"Directeur des Ressources Humaines Opérations",
+    titreSignataire:"", titreSigCustom:"",
+    titreEmpNom:"",
+    titreEmpFonction:"",
     titreDateSig:"", titreDuree:"3",
     titreLignes:null                            /* null = déduit du symbole */
   };
@@ -3645,9 +3650,9 @@ function normalize(d){
   if(!Array.isArray(sess.titreLignes) || sess.titreLignes.length!==4) sess.titreLignes = null;
   if(!old.titreSignataire){   /* session enregistrée avant les signataires */
     const m = SIGNATAIRES.find(x=>x.nom===sess.titreEmpNom);
-    sess.titreSignataire = m ? m.id : (CLEAN(sess.titreEmpNom) ? "autre" : "DA");
+    sess.titreSignataire = m ? m.id : (CLEAN(sess.titreEmpNom) ? "autre" : "");
   }
-  if(sess.titreSignataire!=="autre" && !SIGNATAIRES.some(x=>x.id===sess.titreSignataire)) sess.titreSignataire = "DA";
+  if(sess.titreSignataire && sess.titreSignataire!=="autre" && !SIGNATAIRES.some(x=>x.id===sess.titreSignataire)) sess.titreSignataire = "";
   return {
     session: sess,
     rows: (d.rows||[]).map(r=>{
@@ -4200,7 +4205,7 @@ function titreFieldsDef(){
     {k:"titreEmpNom",l:"Pour l'employeur — nom et prénom"},
     {k:"titreEmpFonction",l:"Pour l'employeur — fonction"},
     {k:"titreSigCustom",l:"Signature de cette personne (image, facultatif)",t:"sigfile"},
-    {k:"titreDateSig",l:"Date de signature (vide = date du jour)",t:"date"},
+    {k:"titreDateSig",l:"Date de signature",t:"date"},
     {k:"titreDuree",l:"Validité (années)"},
     {k:"titreTension",l:"Domaine de tension (une valeur par ligne)",t:"textarea"},
     {k:"titreOuvrages",l:"Ouvrages concernés",t:"textarea"},
@@ -4211,9 +4216,9 @@ function titreFieldsDef(){
 function renderTitres(){ renderTitreFields(); renderTitreLignes(); renderTitreDocs(); }
 function renderTitreFields(){
   $("#titreFields").innerHTML = titreFieldsDef().map(f=>{
-    const cur = S.session.titreSignataire || "DA";
+    const cur = S.session.titreSignataire || "";
     if(f.t==="signataire")
-      return `<label class="f">${esc(f.l)}<select data-sign="1">${SIGNATAIRES.map(x=>`<option value="${x.id}"${cur===x.id?" selected":""}>${esc(x.nom)}</option>`).join("")}<option value="autre"${cur==="autre"?" selected":""}>Autre personne…</option></select>${cur!=="autre" && !SIGN_IMGS[cur] ? `<span class="hint" style="margin:4px 0 0">Signature indisponible : l'espace restera vide.</span>` : ""}</label>`;
+      return `<label class="f">${esc(f.l)}<select data-sign="1"${cur===""?' class="vide"':""}><option value=""${cur===""?" selected":""}>— Choisir le signataire —</option>${SIGNATAIRES.map(x=>`<option value="${x.id}"${cur===x.id?" selected":""}>${esc(x.nom)}</option>`).join("")}<option value="autre"${cur==="autre"?" selected":""}>Autre personne…</option></select>${cur && cur!=="autre" && !SIGN_IMGS[cur] ? `<span class="hint" style="margin:4px 0 0">Signature indisponible : l'espace restera vide.</span>` : ""}</label>`;
     if(f.t==="sigfile"){
       if(cur!=="autre") return "";
       return `<label class="f">${esc(f.l)}<input type="file" accept="image/*" data-sigfile="1">${S.session.titreSigCustom ? `<span class="hint" style="margin:4px 0 0">Signature chargée — <a href="#" data-sigclear="1">retirer</a></span>` : `<span class="hint" style="margin:4px 0 0">Sans image, l'espace reste vide pour une signature manuscrite.</span>`}</label>`;
@@ -4855,7 +4860,7 @@ document.addEventListener("change", e=>{
   const el = e.target;
   if(el.dataset && el.dataset.sign!=null){
     const se = S.session, p = SIGNATAIRES.find(x=>x.id===el.value);
-    se.titreSignataire = p ? p.id : "autre";
+    se.titreSignataire = p ? p.id : (el.value==="" ? "" : "autre");
     se.titreEmpNom = p ? p.nom : "";
     se.titreEmpFonction = p ? p.fonction : "";
     save(); renderTitreFields(); renderTitreDocs();
@@ -5021,6 +5026,59 @@ document.addEventListener("keydown", e=>{
 ["mousedown","touchstart"].forEach(ev=> document.addEventListener(ev, e=>{ if(e.target.id==="pad") padStart(e); }, {passive:false}));
 ["mousemove","touchmove"].forEach(ev=> document.addEventListener(ev, e=>{ if(PAD.last) padMove(e); }, {passive:false}));
 ["mouseup","touchend","touchcancel"].forEach(ev=> document.addEventListener(ev, padEnd));
+
+
+/* ---------------- champs obligatoires non renseignés : mise en rouge ---------------- */
+function reqSessionKeys(){
+  const g = S.session.type==="gaz";
+  return g ? ["numero","dateDebut","lieu","duree","formateur","siteIntervenant","organisme"]
+           : ["numero","dateDebut","dateFin","lieu","duree","dureePratique","formateur","siteIntervenant","organisme",
+              "titreDateSig","titreEmpNom","titreEmpFonction","titreTension","titreOuvrages","titreIndications","titreAutorisations"];
+}
+function reqRowKeys(r){
+  const g = S.session.type==="gaz";
+  const k = ["nom","prenom","filiale","site","pratique","avis"];
+  if(!g) k.push("fonction","typeForm","elearn");
+  if(r.avis!=="A") k.push("note");
+  return k;
+}
+let _videT = 0;
+function markEmpty(){
+  _videT = 0;
+  let n = 0;
+  const rs = reqSessionKeys();
+  document.querySelectorAll("select[data-sign]").forEach(el=>{
+    const bad = !S.session.titreSignataire;
+    el.classList.toggle("vide", bad);
+    if(bad) n++;
+  });
+  document.querySelectorAll("[data-s]").forEach(el=>{
+    const k = el.dataset.s;
+    if(el.type==="checkbox") return;
+    /* nom / fonction du signataire : déduits du choix du signataire, pas comptés à part tant qu'il n'est pas choisi */
+    if((k==="titreEmpNom"||k==="titreEmpFonction") && !S.session.titreSignataire){ el.classList.remove("vide"); return; }
+    const bad = rs.indexOf(k)>=0 && !String(S.session[k]==null?"":S.session[k]).trim();
+    el.classList.toggle("vide", bad);
+    if(bad && el.offsetParent!==null) n++;
+  });
+  document.querySelectorAll("#tbody [data-i][data-k]").forEach(el=>{
+    const r = S.rows[+el.dataset.i]; if(!r) return;
+    const bad = reqRowKeys(r).indexOf(el.dataset.k)>=0 && !String(r[el.dataset.k]==null?"":r[el.dataset.k]).trim();
+    el.classList.toggle("vide", bad);
+    if(bad) n++;
+  });
+  const c = $("#count");
+  if(c){
+    let v = $("#videInfo");
+    if(!v){ v = document.createElement("span"); v.id = "videInfo"; c.insertAdjacentElement("afterend", v); }
+    const t = n ? "⚠ "+n+" champ"+(n>1?"s":"")+" à renseigner" : "";
+    if(v.textContent!==t) v.textContent = t;   /* évite de relancer l'observateur en boucle */
+  }
+}
+function scheduleMarkEmpty(){ if(!_videT) _videT = requestAnimationFrame(markEmpty); }
+["input","change"].forEach(ev=> document.addEventListener(ev, scheduleMarkEmpty, true));
+new MutationObserver(scheduleMarkEmpty).observe(document.body, {childList:true, subtree:true});
+document.addEventListener("click", scheduleMarkEmpty, true);
 
 /* ---------------- démarrage ---------------- */
 window.__bootApp = function boot(){
