@@ -351,7 +351,9 @@ body:not(.locked) #authGate{display:none}
     <button id="btnQcm" class="ghost">Importer les notes QCM (capture)</button>
     <button id="btnAdd" class="ghost">+ Ajouter un participant</button>
     <button id="btnAllOk" class="ghost">Tout valider</button>
-    <button id="btnFilSite" class="ghost">Filiale / site pour tous…</button>
+    <span class="grp"><select id="selFilAll" aria-label="Filiale à appliquer à tous"></select><button id="btnFilAll" class="ghost">Filiale pour tous</button></span>
+    <span class="grp" id="grpFonctionAll"><select id="selFonctionAll" aria-label="Fonction à appliquer à tous"></select><button id="btnFonctionAll" class="ghost">Fonction pour tous</button></span>
+    <button id="btnFilSite" class="ghost">Site pour tous…</button>
     <span class="grp" id="grpTypeAll">
       <select id="selTypeAll" aria-label="Type de formation à appliquer">
         <option value="Initiale">Initiale</option>
@@ -3420,7 +3422,7 @@ function docxTitres(S, rows){
       AUTORISATIONS:[t.autorisations, t.mention].filter(Boolean).join("\n"),
       TITULAIRE:t.titulaire,
       EMPNOM:t.empNom, EMPFONCTION:t.empFonction,
-      DATESIG:t.dateSig, VALIDITE:t.validite
+      DATESIG:t.dateSig, VALIDITE:t.validite, SESSION:t.session
     };
     t.lignes.forEach((L,i)=>{
       map["S"+(i+1)] = L.symbole;
@@ -3484,6 +3486,20 @@ const KEY = "fd-attestations-v2";
 const HAB = ["BS","BS BC B2","BS B0 H0 BE Manœuvre","BR B1V H0","BR B1V H0 BC B2"];
 const FILIALES = ["SAV","DGO","DGE","DIF","DARTY","FNAC"];
 const FONCTIONS = ["Technicien","Livreur","Encadrant technique","Encadrant livraison","Encadrant magasin"];
+/* fonction accordée selon la civilité (M. → Technicien, Mme → Technicienne) */
+const FONC_FEM = [["Technicien","Technicienne"],["Livreur","Livreuse"],["Encadrant","Encadrante"]];
+function fonctionCiv(f, civ){
+  f = String(f||"").trim(); if(!f) return f;
+  const fem = civ==="Mme";
+  for(const [m,w] of FONC_FEM){
+    const a = fem ? m : w, b = fem ? w : m;
+    if(f===a || f.indexOf(a+" ")===0) return b + f.slice(a.length);
+  }
+  return f;
+}
+/* filiale → raison sociale portée sur le titre d'habilitation */
+const FILIALE_TITRE = {DGO:"Darty Grand Ouest", DGE:"Darty Grand Est", DIF:"Darty Ile de France"};
+function filialeTitre(f){ f = CLEAN(f); return FILIALE_TITRE[f.toUpperCase()] || f; }
 /* Personnel désigné sur le titre, proposé d'après le symbole d'habilitation */
 const PERSONNEL = {
   "BS":"Chargé d'intervention",
@@ -3516,7 +3532,7 @@ function blankSession(){
     type:"elec", habilitation:"BS", techAc:false,
     intitule:"", intituleAuto:true, intituleFE:"",
     dateDebut:"", dateFin:"", lieu:"", duree:"7", dureePratique:"2", numero:"",
-    formateur:"", siteIntervenant:"IVRY / SEINE", organisme:"FDPS",
+    formateur:"", siteIntervenant:"IVRY / SEINE", organisme:"Académie FNAC DARTY",
     operations:TXT.operations, defautType:"Recyclage",
     /* le champ « Filiale » reste une saisie manuelle libre, jamais déduit du site */
     societe:"FNAC DARTY",                       /* attestation gaz : société par défaut */
@@ -3587,7 +3603,8 @@ function titreData(s, r){
   const dFin = s.dateFin || s.dateDebut;
   return {
     nom:(r.nom||"").toUpperCase(), prenom:r.prenom||"", fonction:r.fonction||"",
-    employeur:CLEAN(r.filiale) || CLEAN(s.employeur),
+    employeur:filialeTitre(r.filiale) || CLEAN(s.employeur),
+    session:CLEAN(s.numero),
     affect1:r.site || r.etab || "", affect2:"",
     dateForm:fdate(dFin),
     organisme:CLEAN(s.titreOrganisme) || CLEAN(s.organisme),
@@ -3660,7 +3677,7 @@ function fdate(iso){ if(!iso) return "……/……/………"; const p=iso.spli
 function plusYears(iso,n){ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; d.setFullYear(d.getFullYear()+n); return fdate(d.toISOString().slice(0,10)); }
 function slug(s){ return String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"").toLowerCase(); }
 function fullName(r){ return [r.civ, (r.nom||"").toUpperCase(), r.prenom].filter(Boolean).join(" ").trim(); }
-function autoTitle(s){ return s.type==="gaz" ? "Règles de sécurité gaz" : "Habilitation électrique "+s.habilitation; }
+function autoTitle(s){ return s.type==="gaz" ? "Sécurité GAZ" : "Habilitation électrique "+s.habilitation; }
 function stageTitle(){ const s = S.session; return (s.intituleAuto===false && s.intitule) ? s.intitule : autoTitle(s); }
 const AVIS = {F:"Avis favorable", D:"Avis défavorable", A:"Absent", R:"Avis favorable sous réserves"};
 const AVIS_COURT = {F:"Favorable", D:"Défavorable", A:"Absent", R:"Sous réserves"};
@@ -3878,7 +3895,7 @@ function fieldsDef(){
 function renderSession(){
   const host = $("#sessionFields");
   host.innerHTML = fieldsDef().map(f=>{
-    const v = esc(S.session[f.k]);
+    const v = esc(f.k==="intitule" && S.session.intituleAuto!==false ? autoTitle(S.session) : S.session[f.k]);
     const ctl = f.t==="select"
       ? `<select data-s="${f.k}" id="s-${f.k}">${f.o.map(o=>`<option${o===S.session[f.k]?" selected":""}>${esc(o)}</option>`).join("")}</select>`
       : `<input type="${f.t}" data-s="${f.k}" id="s-${f.k}" value="${v}"${f.ph?` placeholder="${esc(f.ph)}"`:""}>`;
@@ -4140,7 +4157,7 @@ function titreHTML(r){
       </tr>
       <tr>
         <td colspan="2" class="w">Avis émis&nbsp;: <strong style="color:#c00000">${esc(T.avis)}</strong></td>
-        <td colspan="3" class="w" style="text-align:center">CHAMPS D'APPLICATION</td>
+        <td colspan="3" class="w" style="text-align:center">N° / code de session&nbsp;: <strong>${esc(T.session)}</strong></td>
       </tr>
       <tr>
         <td class="hd">Personnel</td><td class="hd">Symbole d'habilitation</td>
@@ -4411,7 +4428,7 @@ function pdfTitre(S, r, A, doc){
   });
   row(8.5, (yy,h)=>{
     box(0,2,yy,h,WHITE); say2(0,2,yy,h,"Avis émis : ",T.avis,[192,0,0]);
-    cell(2,5,yy,h,WHITE,"CHAMPS D'APPLICATION",{align:"center"});
+    cell(2,5,yy,h,WHITE,"N° / code de session : "+T.session,{align:"center"});
   });
   const HEADS = ["Personnel","Symbole d'habilitation","Domaine de tension","Ouvrages concernés","Indications supplémentaires"];
   row(Math.max(8, ...HEADS.map((t,i)=>need(t, wid(i,i+1)))), (yy,h)=>{
@@ -4749,13 +4766,27 @@ document.addEventListener("click", e=>{
   switch(t.id){
     case "btnAdd": S.rows.push(blankRow()); refresh(); break;
     case "btnAllOk": S.rows.forEach(r=>{ r.elearn="OUI"; r.pratique="OUI"; r.avis="F"; }); refresh(); break;
+    case "btnFilAll": {
+      if(!S.rows.length){ alert("Aucun participant."); break; }
+      const v = $("#selFilAll").value;
+      S.rows.forEach(r=>{ r.filiale = v; });
+      refresh();
+      toast("Filiale « "+v+" » appliquée à "+S.rows.length+" participant"+(S.rows.length>1?"s":"")+" — modifiable ligne par ligne");
+      break;
+    }
+    case "btnFonctionAll": {
+      if(!S.rows.length){ alert("Aucun participant."); break; }
+      const v = $("#selFonctionAll").value;
+      S.rows.forEach(r=>{ r.fonction = fonctionCiv(v, r.civ); });
+      refresh();
+      toast("Fonction appliquée à "+S.rows.length+" participant"+(S.rows.length>1?"s":"")+" (accordée selon M. / Mme) — modifiable ligne par ligne");
+      break;
+    }
     case "btnFilSite": {
       if(!S.rows.length){ alert("Aucun participant."); break; }
-      const f = prompt("Filiale à appliquer à tous les participants (laisser vide pour ne pas changer) :", S.rows[0].filiale||"SAV");
-      if(f===null) break;
       const st = prompt("Site à appliquer à tous les participants (laisser vide pour ne pas changer) :", S.rows[0].site||S.session.lieu||"");
       if(st===null) break;
-      S.rows.forEach(r=>{ if(f.trim()) r.filiale=f.trim(); if(st.trim()) r.site=st.trim(); });
+      S.rows.forEach(r=>{ if(st.trim()) r.site=st.trim(); });
       refresh();
       break;
     }
@@ -4860,7 +4891,13 @@ document.addEventListener("input", e=>{
     save();
     if(k==="techAc") renderTable();
     if(k==="formateur") renderSignatures();
-    if(k==="habilitation"){ S.session.titreLignes = null; renderTitres(); save(); }
+    if(k==="habilitation"){
+      S.session.titreLignes = null;
+      /* l'intitulé du stage suit le titre d'habilitation choisi */
+      S.session.intituleAuto = true; S.session.intitule = "";
+      const it = $("#s-intitule"); if(it){ it.value = autoTitle(S.session); it.placeholder = autoTitle(S.session); }
+      renderTitres(); save();
+    }
     else if(k==="employeur" || k==="societe" || k.indexOf("titre")===0) renderTitreDocs();
     return;
   }
@@ -4881,6 +4918,11 @@ document.addEventListener("input", e=>{
 document.addEventListener("change", e=>{
   const el = e.target;
   if(el.id==="wType"){ syncWizForm(); renderWizard(); return; }
+  if(el.dataset.k==="civ" && el.dataset.i!=null){
+    const r = S.rows[+el.dataset.i];
+    if(r){ r.civ = el.value; r.fonction = fonctionCiv(r.fonction, r.civ); save(); renderTable(); renderTitreDocs(); }
+    return;
+  }
   if(el.id==="filePdf" && el.files && el.files[0]){ handlePdf(el.files[0]); el.value=""; return; }
   if(el.id==="fileSig" && el.files && el.files[0]){
     const which = PAD.target==="academie" ? "academie" : "formateur";
@@ -4989,7 +5031,9 @@ window.__bootApp = function boot(){
   document.body.appendChild(dl);
   const dl2 = document.createElement("datalist");
   dl2.id = "dl-fonction";
-  dl2.innerHTML = FONCTIONS.map(f=>`<option value="${f}">`).join("");
+  dl2.innerHTML = FONCTIONS.concat(FONCTIONS.map(f=>fonctionCiv(f,"Mme")).filter(f=>FONCTIONS.indexOf(f)<0)).map(f=>`<option value="${f}">`).join("");
+  $("#selFilAll").innerHTML = FILIALES.map(f=>`<option>${f}</option>`).join("");
+  $("#selFonctionAll").innerHTML = FONCTIONS.map(f=>`<option>${f}</option>`).join("");
   document.body.appendChild(dl2);
 
   const saved = hasSaved();
