@@ -314,7 +314,7 @@ label.f:has(.vide){color:var(--bad)}
   <div class="brand">
     <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty"></a>
     <div>
-      <h1>Attestations de formation <span id="appVersion" class="appver">v6.4</span></h1>
+      <h1>Attestations de formation <span id="appVersion" class="appver">v6.5</span></h1>
       <p>Habilitation électrique &amp; Règles de sécurité gaz</p>
     </div>
   </div>
@@ -548,6 +548,9 @@ function qcmMatch(items, rows){
 /* ---------- interface : import des notes QCM depuis une capture d'écran ---------- */
 const TESS_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js";
 let QZ = {step:"drop", busy:false, status:"", error:"", res:null, img:null};
+/* pièces jointes de la session, ajoutées à l'archive .zip (non sauvegardées : gardées tant que la page reste ouverte) */
+let ATT = {emarg:[], qcm:[]};
+function attName(n, def){ return String(n||def).replace(/[\\\/:*?"<>|]+/g,"_").trim() || def; }
 let tessP = null, tessW = null;
 
 function loadTess(){
@@ -588,6 +591,7 @@ async function qHandle(file){
   if(!file || !/^image\//.test(file.type||"")){ QZ.error = "Le fichier n'est pas une image (PNG, JPG…). Collez ou déposez la capture d'écran."; renderQcm(); return; }
   QZ.busy = true; QZ.error = ""; QZ.status = "Préparation de l'image…"; renderQcm();
   try{
+    QZ.pendingImg = {type:file.type, name:file.name||"", bytes:new Uint8Array(await file.arrayBuffer())};
     const T = await loadTess();
     const canvas = await qPrep(file);
     if(!tessW){
@@ -668,6 +672,10 @@ function openQcm(){
 function closeQcm(){ $("#qcm").hidden = true; }
 function qApply(){
   let n=0, over=0;
+  if(QZ.pendingImg){
+    const pi = QZ.pendingImg, ext = (/jpe?g/.test(pi.type)?"jpg":/webp/.test(pi.type)?"webp":"png");
+    ATT.qcm.push({name:"resultats_qcm" + (ATT.qcm.length ? "_" + (ATT.qcm.length+1) : "") + "." + ext, bytes:pi.bytes});
+  }
   QZ.res.items.forEach(it=>{
     if(it.match<0 || it.problem || it.note==null) return;
     const r = S.rows[it.match]; if(!r) return;
@@ -4517,8 +4525,10 @@ function exportZip(){
         nt++;
       });
     }
+    ATT.emarg.forEach(f=> files.push({name:"Feuille_emargement/" + uniq("E/", f.name), data:f.bytes}));
+    ATT.qcm.forEach(f=> files.push({name:"Resultats_QCM/" + uniq("Q/", f.name), data:f.bytes}));
     saveBlob(zipStore(files, "application/zip"), zipBaseName() + ".zip");
-    toast("Archive « " + zipBaseName() + ".zip » : 1 synthèse, " + S.rows.length + " attestation" + (S.rows.length>1?"s":"") + (g ? "" : ", " + nt + " titre" + (nt>1?"s":"")));
+    toast("Archive « " + zipBaseName() + ".zip » : 1 synthèse, " + S.rows.length + " attestation" + (S.rows.length>1?"s":"") + (g ? "" : ", " + nt + " titre" + (nt>1?"s":"")) + (ATT.emarg.length ? ", la feuille d'émargement" : "") + (ATT.qcm.length ? ", la capture QCM" : ""));
   }catch(e){ alert("Génération de l'archive impossible : " + (e && e.message ? e.message : e)); }
 }
 
@@ -4628,6 +4638,7 @@ async function handlePdf(file){
   WZ.busy = true; WZ.error = ""; renderWizard();
   try{
     const buf = await file.arrayBuffer();
+    const rawCopy = new Uint8Array(buf.slice(0));   /* copie avant lecture : le lecteur PDF peut vider le tampon */
     const items = await extractItems(buf);
     if(!items.length){
       WZ.busy = false;
@@ -4641,6 +4652,7 @@ async function handlePdf(file){
     const guess = guessType(res.session.intitule) || {type:S.session.type, habilitation:S.session.habilitation};
     WZ.busy = false;
     WZ.parsed = {
+      file:{name:attName(file.name,"feuille_emargement.pdf"), bytes:rawCopy},
       res,
       rows: res.rows.map(r=>Object.assign(blankRow(),{
         filiale:r.filiale || "", site:r.site || r.etab || "", etab:r.etab || "",
@@ -4708,8 +4720,9 @@ function wizardApply(replace){
     formateur:(p.form.formateur||"").trim(),
     defautType: normType(p.form.defautType) || "Recyclage"
   };
-  if(replace) S = {session:Object.assign(blankSession(), header), rows:p.rows.map(r=>Object.assign({},r)), sig:blankSig()};
+  if(replace){ ATT = {emarg:[], qcm:[]}; S = {session:Object.assign(blankSession(), header), rows:p.rows.map(r=>Object.assign({},r)), sig:blankSig()}; }
   else { S.rows = S.rows.concat(p.rows.map(r=>Object.assign({},r))); if(!S.session.formateur) S.session.formateur = header.formateur; }
+  if(p.file) ATT.emarg.push(p.file);
   closeWizard();
   refresh();
   setTab("saisie");
@@ -4813,7 +4826,7 @@ document.addEventListener("click", e=>{
     case "wizResume": closeWizard(); break;
     case "wizBack": WZ.step="drop"; WZ.parsed=null; WZ.error=""; renderWizard(); break;
     case "wizBlank":
-      S = {session:blankSession(), rows:[], sig:blankSig()};
+      ATT = {emarg:[], qcm:[]}; S = {session:blankSession(), rows:[], sig:blankSig()};
       closeWizard(); refresh(); setTab("saisie");
       break;
     case "wizCreate": wizardApply(true); break;
@@ -4950,7 +4963,7 @@ document.addEventListener("change", e=>{
   if(el.id==="fileJson" && el.files && el.files[0]){
     const fr = new FileReader();
     fr.onload = () => { try{ const d=JSON.parse(fr.result);
-        if(d && d.session && Array.isArray(d.rows)){ S = normalize(d); closeWizard(); refresh(); setTab("saisie"); }
+        if(d && d.session && Array.isArray(d.rows)){ ATT = {emarg:[], qcm:[]}; S = normalize(d); closeWizard(); refresh(); setTab("saisie"); }
         else alert("Ce fichier ne contient pas de session valide.");
       }catch(err){ alert("Fichier illisible : "+err.message); } };
     fr.readAsText(el.files[0]);
