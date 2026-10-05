@@ -18,6 +18,7 @@ header{padding:18px 20px 6px;max-width:1300px;margin:0 auto}
 h1{margin:0;font-size:22px}
 header p{margin:4px 0 0;color:var(--muted)}
 .brand{display:flex;align-items:center;gap:12px}
+.ver{font-size:.5em;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:middle;white-space:nowrap}
 .brand a{display:block;line-height:0}
 .brand a:hover img{opacity:.85}
 .brand img{width:56px;height:auto;display:block}
@@ -41,6 +42,18 @@ button.primary{background:var(--brand);color:var(--brand-ink);border-color:var(-
 button:disabled{opacity:.45;cursor:not-allowed}
 button.small{padding:3px 8px;font-size:13px}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+td.bd{width:116px}
+.birthBox{margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
+.birthBox.over{background:color-mix(in srgb,var(--brand) 8%,transparent)}
+#xlsMsg .ok,#xlsMsg .warn,#xlsMsg .err{display:block;margin-top:4px;font-size:13px}
+.scanGrp{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px}
+.scanGrp.over{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 8%,transparent)}
+.scanHead{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.scanList{list-style:none;margin:6px 0 0;padding:0;font-size:13px}
+.scanList li{display:flex;align-items:center;gap:8px;padding:3px 0;border-top:1px dashed var(--line)}
+.scanList li span.n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scanList li span.s{color:var(--muted);white-space:nowrap}
+.scanList li button{padding:0 8px;line-height:1.4}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:4px 4px}
 td{padding:3px 3px;border-top:1px solid var(--line)}
@@ -118,7 +131,7 @@ body:not(.locked) #authGate{display:none}
   <div class="brand">
     <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty" hidden></a>
     <div>
-      <h1>Documents SST</h1>
+      <h1>Documents SST <span class="ver" title="Version de l’outil">v1.1</span></h1>
       <p>Importez la feuille d’émargement, vérifiez les participants, puis générez les PDF de chaque étape.</p>
     </div>
   </div>
@@ -151,6 +164,13 @@ body:not(.locked) #authGate{display:none}
       </div>
       <input id="file" type="file" accept="application/pdf" multiple hidden>
       <div id="msg" aria-live="polite"></div>
+      <div class="birthBox" id="birthBox">
+        <strong>Dates de naissance</strong> <span class="hint">(facultatif)</span>
+        <p class="hint">Importez la fiche de renseignements (Excel .xlsx, onglet « Fiche ») : les dates de naissance sont rapprochées des participants par nom et prénom (accents, majuscules, ordre nom/prénom et tirets sans importance). Elles se corrigent ensuite dans le tableau ci-dessous.</p>
+        <div class="actions" style="margin-top:6px"><button id="xlsBtn" type="button">Importer la fiche de renseignements (.xlsx)</button></div>
+        <input id="xlsFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        <div id="xlsMsg" aria-live="polite"></div>
+      </div>
     </section>
 
     <section class="card">
@@ -178,7 +198,7 @@ body:not(.locked) #authGate{display:none}
     <section class="card">
       <h2><span class="num">3</span> Participants <span id="count" class="hint"></span></h2>
       <table>
-        <thead><tr><th></th><th>NOM</th><th>Prénom</th><th></th></tr></thead>
+        <thead><tr><th></th><th>NOM</th><th>Prénom</th><th>Naissance</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
       <div class="actions">
@@ -241,7 +261,7 @@ body:not(.locked) #authGate{display:none}
           <button id="gZip" disabled>ZIP : un PDF par participant</button>
           <button id="gOne" disabled>PDF du participant affiché</button>
         </div>
-        <p class="hint">La grille (2 pages) est celle de la formation initiale ou du MAC selon le choix ci-dessus.</p>
+        <p class="hint">La grille (2 pages A5 réunies sur une feuille A4 paysage) est celle de la formation initiale ou du MAC selon le choix ci-dessus.</p>
       </section>
     </div>
     <div id="step3" hidden>
@@ -262,7 +282,12 @@ body:not(.locked) #authGate{display:none}
         <div id="attLines"></div>
       </section>
       <section class="card">
-        <h2><span class="num">6</span> Exporter les attestations</h2>
+        <h2><span class="num">6</span> Documents scannés à joindre au ZIP</h2>
+        <p class="hint">Facultatif. Ajoutez les documents scannés après la formation (PDF, JPG ou PNG) : ils seront ajoutés tels quels au ZIP « Télécharger tous les documents », dans le dossier 4_Documents_scannes. Glissez-déposez les fichiers sur le bloc voulu ou utilisez « Ajouter ».</p>
+        <div id="scanBox"></div>
+      </section>
+      <section class="card">
+        <h2><span class="num">7</span> Exporter les attestations</h2>
         <div class="actions">
           <button id="aAll" class="primary" disabled>Un seul PDF (attestations cochées)</button>
           <button id="aZip" disabled>ZIP : un PDF par participant</button>
@@ -271,7 +296,7 @@ body:not(.locked) #authGate{display:none}
         <div class="actions">
           <button id="zAll" class="primary" disabled>Télécharger tous les documents (.zip)</button>
         </div>
-        <p class="hint">Le ZIP regroupe, en trois dossiers, les fiches d’évaluation, les grilles de certification et les attestations cochées : un PDF par participant.</p>
+        <p class="hint">Le ZIP regroupe, en trois dossiers, les fiches d’évaluation, les grilles de certification et les attestations cochées : un PDF par participant. Les documents scannés ajoutés ci-dessus sont joints dans un quatrième dossier, 4_Documents_scannes.</p>
         <p class="hint">Fichiers nommés Attestation_…_prénom_nom. Sans certification, la ligne « a obtenu / a renouvelé son certificat » n’est pas imprimée.</p>
       </section>
     </div>
@@ -908,8 +933,117 @@ async function importFiles(files){
   }
   marquerChampsManquants();
   say("", notes.join("<br>"));
+  if (ficheRows.length) applyFiche();
   state.sel = 0; syncForm(); renderRows(); if(state.step===2) renderEval(); refresh();
 }
+
+/* ---------- dates de naissance : fiche de renseignements Excel (.xlsx, onglet « Fiche ») ---------- */
+let ficheRows = [];   // lignes lues dans l'Excel (non enregistrées avec la session) : {nom, prenom, naissance, tok}
+const nameTokens = s => strip(String(s==null?"":s)).toLowerCase().split(/[^a-z]+/).filter(Boolean);
+function parseDateCell(v){
+  if (v===null || v===undefined || v==="") return "";
+  const two = n=>String(n).padStart(2,"0"), okd = (d,m)=>d>=1&&d<=31&&m>=1&&m<=12;
+  if (typeof v==="number"){
+    if (!(v>=1 && v<80000)) return "";
+    const d = new Date(Date.UTC(1899,11,30)+Math.round(v)*86400000);       // numéro de série Excel
+    return two(d.getUTCDate())+"/"+two(d.getUTCMonth()+1)+"/"+d.getUTCFullYear();
+  }
+  const s = String(v).trim(); let m;
+  if ((m=s.match(/^(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{4})/)) && okd(+m[1],+m[2])) return two(m[1])+"/"+two(m[2])+"/"+m[3];
+  if ((m=s.match(/^(\d{4})-(\d{2})-(\d{2})/)) && okd(+m[3],+m[2])) return m[3]+"/"+m[2]+"/"+m[1];
+  if (/^\d+(\.\d+)?$/.test(s)) return parseDateCell(parseFloat(s));
+  return "";                                                               // « /     / » et autres champs vides
+}
+/* lecteur .xlsx minimal (JSZip + DOMParser) : seuls les onglets visibles sont lus, jamais les onglets masqués */
+async function readFicheXlsx(buf){
+  const zip = await JSZip.loadAsync(buf);
+  const xml = async p => { const f = zip.file(p); return f ? new DOMParser().parseFromString(await f.async("string"),"application/xml") : null; };
+  const wb = await xml("xl/workbook.xml"); if (!wb) throw new Error("ce n’est pas un fichier Excel .xlsx");
+  const rels = await xml("xl/_rels/workbook.xml.rels"), relMap = {};
+  if (rels) for (const r of rels.getElementsByTagName("Relationship")) relMap[r.getAttribute("Id")] = r.getAttribute("Target");
+  const sheets = [...wb.getElementsByTagName("sheet")].map(s=>({
+    name:s.getAttribute("name")||"", hidden:(s.getAttribute("state")||"visible")!=="visible",
+    rid:s.getAttribute("r:id") || s.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","id") }));
+  const sst = await xml("xl/sharedStrings.xml"), shared = [];
+  if (sst) for (const si of sst.getElementsByTagName("si")) shared.push([...si.getElementsByTagName("t")].map(t=>t.textContent).join(""));
+  const rowsOf = async sh=>{
+    let t = relMap[sh.rid]; if (!t) return []; t = t.startsWith("/") ? t.slice(1) : "xl/"+t;
+    const doc = await xml(t); if (!doc) return [];
+    return [...doc.getElementsByTagName("row")].map(r=>{
+      const o = {};
+      for (const c of r.getElementsByTagName("c")){
+        const col = (c.getAttribute("r")||"").replace(/\d+/g,""), ty = c.getAttribute("t"), vEl = c.getElementsByTagName("v")[0];
+        let val = "";
+        if (ty==="inlineStr") val = [...c.getElementsByTagName("t")].map(x=>x.textContent).join("");
+        else if (vEl){ const raw = vEl.textContent; val = ty==="s" ? (shared[+raw]??"") : (ty==="str"||ty==="b"||ty==="e") ? raw : parseFloat(raw); }
+        if (col) o[col] = val;
+      }
+      return o;
+    });
+  };
+  const cands = sheets.filter(s=>!s.hidden).sort((a,b)=>(/fiche/i.test(b.name)?1:0)-(/fiche/i.test(a.name)?1:0));
+  const hn = v=>strip(String(v==null?"":v)).toLowerCase().replace(/[^a-z]+/g," ").trim();
+  for (const sh of cands){
+    const rows = await rowsOf(sh);
+    for (let i=0;i<Math.min(rows.length,40);i++){
+      const cols = {}; for (const [c,v] of Object.entries(rows[i])){ const h=hn(v);
+        if (h==="nom") cols.nom=c; else if (h==="prenom") cols.prenom=c; else if (/naissance/.test(h)) cols.naiss=c; else if (h==="correction") cols.corr=c; }
+      if (!(cols.nom && cols.prenom && cols.naiss)) continue;
+      const out = [];
+      for (const r of rows.slice(i+1)){
+        const nom = String(r[cols.nom]??"").trim(), prenom = String(r[cols.prenom]??"").trim();
+        if (!nom && !prenom) continue;
+        const naissance = (cols.corr && parseDateCell(r[cols.corr])) || parseDateCell(r[cols.naiss]);
+        out.push({nom, prenom, naissance, tok:nameTokens(nom+" "+prenom)});
+      }
+      return out;
+    }
+  }
+  throw new Error("onglet « Fiche » introuvable (colonnes Nom, Prénom et Date de naissance attendues)");
+}
+function applyFiche(){
+  const box = $("#xlsMsg"); if (!box || !ficheRows.length) return;
+  const key = a=>[...a].sort().join(" "), used = new Set();
+  let ok=0, same=0; const keep=[], nodate=[], none=[], lines=[];
+  for (const p of state.participants){
+    const t = nameTokens(p.nom+" "+p.prenom); if (!t.length) continue;
+    let cand = ficheRows.filter(r=>!used.has(r) && key(r.tok)===key(t));
+    if (!cand.length){                                   // repli : l'un des noms contient l'autre (ex. 2e prénom absent), si une seule ligne convient
+      const c2 = ficheRows.filter(r=>!used.has(r) && r.tok.length>=2 && t.length>=2 && (r.tok.every(x=>t.includes(x)) || t.every(x=>r.tok.includes(x))));
+      cand = c2.length===1 ? c2 : [];
+    }
+    const r = cand[0]; const nm = (p.prenom+" "+p.nom).trim();
+    if (!r){ none.push(nm); continue; }
+    used.add(r);
+    if (!r.naissance){ nodate.push(nm); continue; }
+    if (!p.naissance){ p.naissance = r.naissance; ok++; }
+    else if (p.naissance===r.naissance) same++;
+    else keep.push(nm+" (tableau : "+p.naissance+", Excel : "+r.naissance+")");
+  }
+  const rest = ficheRows.filter(r=>!used.has(r)).map(r=>(r.prenom+" "+r.nom).trim());
+  lines.push(`<span class="ok">Fiche de renseignements : ${ok+same} participant(s) rapproché(s) sur ${state.participants.length}${ok? ", "+ok+" date(s) de naissance renseignée(s)":""}.</span>`);
+  if (none.length)   lines.push(`<span class="warn">Sans correspondance dans l’Excel : ${esc(none.join(", "))}.</span>`);
+  if (nodate.length) lines.push(`<span class="warn">Trouvé(s) mais sans date de naissance valide : ${esc(nodate.join(", "))}.</span>`);
+  if (keep.length)   lines.push(`<span class="warn">Date déjà saisie et différente, conservée : ${esc(keep.join(" ; "))}.</span>`);
+  if (rest.length)   lines.push(`<span class="warn">Dans l’Excel mais absent(s) des participants : ${esc(rest.join(", "))}.</span>`);
+  box.innerHTML = lines.join("");
+  renderRows(); if (state.step===2) renderEval(); refresh();
+}
+async function importFiche(f){
+  const box = $("#xlsMsg");
+  try{
+    ficheRows = await readFicheXlsx(await f.arrayBuffer());
+    if (!ficheRows.length){ box.innerHTML = `<span class="err">${esc(f.name)} : aucune ligne participant trouvée dans l’onglet.</span>`; return; }
+    if (!state.participants.length){ box.innerHTML = `<span class="ok">${esc(f.name)} : ${ficheRows.length} ligne(s) lue(s). Les dates seront rapprochées dès que les participants seront importés.</span>`; return; }
+    applyFiche();
+  }catch(e){ box.innerHTML = `<span class="err">${esc(f.name)} : lecture impossible (${esc(e.message||String(e))}).</span>`; }
+}
+$("#xlsBtn").onclick = ()=>$("#xlsFile").click();
+$("#xlsFile").onchange = e=>{ const f=e.target.files[0]; e.target.value=""; if (f) importFiche(f); };
+(()=>{ const b=$("#birthBox");
+  ["dragover","dragenter"].forEach(ev=>b.addEventListener(ev,e=>{e.preventDefault();b.classList.add("over");}));
+  ["dragleave","drop"].forEach(ev=>b.addEventListener(ev,e=>{e.preventDefault();b.classList.remove("over");}));
+  b.addEventListener("drop",e=>{ const f=[...e.dataTransfer.files].find(x=>/\.xlsx$/i.test(x.name)); if (f) importFiche(f); }); })();
 
 /* ---------- génération PDF (jsPDF, vectoriel) ---------- */
 const K = 595.32/827;                       // px du modèle (827 px de large) -> points
@@ -1064,11 +1198,12 @@ function renderRows(){
     tr.innerHTML = `<td class="n" title="Afficher l’aperçu">${i+1}</td>
       <td><input type="text" data-k="nom" aria-label="Nom"></td>
       <td><input type="text" data-k="prenom" aria-label="Prénom"></td>
+      <td class="bd"><input type="text" data-k="naissance" placeholder="jj/mm/aaaa" aria-label="Date de naissance"></td>
       <td class="btns"><button class="small" data-a="swap" title="Inverser nom et prénom">⇄</button> <button class="small" data-a="del" title="Supprimer">✕</button></td>`;
-    tr.querySelector('[data-k=nom]').value = p.nom; tr.querySelector('[data-k=prenom]').value = p.prenom;
+    tr.querySelector('[data-k=nom]').value = p.nom; tr.querySelector('[data-k=prenom]').value = p.prenom; tr.querySelector('[data-k=naissance]').value = p.naissance||"";
     tr.querySelectorAll("input").forEach(inp=>{
       inp.addEventListener("focus",()=>{ if(state.sel!==i){ state.sel=i; markSel(); refresh(); } });
-      inp.addEventListener("input",()=>{ p[inp.dataset.k]=inp.value; if(p.chk){ delete p.chk; tr.classList.remove("uncertain"); } refresh(true); });
+      inp.addEventListener("input",()=>{ p[inp.dataset.k]=inp.value; if(p.chk && inp.dataset.k!=="naissance"){ delete p.chk; tr.classList.remove("uncertain"); } refresh(true); });
     });
     tr.querySelector(".n").onclick=()=>{ state.sel=i; markSel(); refresh(); };
     tr.querySelector('[data-a=swap]').onclick=()=>{ [p.nom,p.prenom]=[p.prenom.toUpperCase(),titleCase(p.nom)]; state.sel=i; renderRows(); refresh(); };
@@ -1329,8 +1464,13 @@ function drawGrille(doc, gkey, d){
   };
   const fmtName = (k)=>k;
 
+  // Mise en page : chaque page A4 portrait de la grille est réduite à l'échelle A5 (÷√2)
+  // et placée côte à côte sur une feuille A4 paysage (page 1 à gauche, page 2 à droite).
+  const Wl = doc.internal.pageSize.getWidth(), Hl = doc.internal.pageSize.getHeight(); // A4 paysage (pt)
+  const Hp = Wl, sc = Hl/Hp;                                                           // hauteur d'une page portrait ; échelle = 1/√2
   S.pages.forEach((pg,pi)=>{
-    if (pi) doc.addPage();
+    if (pi%2===0 && pi) doc.addPage();                  // nouvelle feuille toutes les 2 pages du modèle
+    doc.internal.write("q "+sc.toFixed(6)+" 0 0 "+sc.toFixed(6)+" "+((pi%2)*Wl/2).toFixed(4)+" "+(sc*(Hp-Hl)).toFixed(4)+" cm");
     black();
     doc.addImage(LOGO_INRS,"JPEG",X(40),X(60),X(135),X(135*147/404));
     doc.addImage(LOGO_SST,"JPEG",X(711),X(S.sstY),X(78),X(78));
@@ -1432,6 +1572,7 @@ function drawGrille(doc, gkey, d){
     doc.setTextColor(...ORANGE); T(a,sx,1121,{style:"bold",size:9}); T(bb,sx+wa/K,1121,{size:9});
     T(S.date,413.5,1141,{style:"italic",size:9,align:"center"});
     black();
+    doc.internal.write("Q");
   });
 }
 
@@ -1445,7 +1586,7 @@ function grilleData(p,g){
 }
 function buildGrilles(list){
   const g = effGrille(); const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({unit:"pt",format:"a4",compress:true});
+  const doc = new jsPDF({unit:"pt",format:"a4",orientation:"landscape",compress:true});  // 2 × A5 sur une feuille A4 paysage
   list.forEach((p,i)=>{ if(i) doc.addPage(); drawGrille(doc,g,grilleData(p,g)); });
   doc.setProperties({title:"Grille de certification des compétences du SST"});
   return doc;
@@ -1495,7 +1636,7 @@ function renderEval(){
   rec.appendChild(fin); box.appendChild(rec);
   const nb = document.createElement("div"); nb.className="evnaiss";
   nb.innerHTML = `<label>Date de naissance (facultatif)</label><input type="text" placeholder="jj/mm/aaaa" aria-label="Date de naissance">`;
-  const inp = nb.querySelector("input"); inp.value = p.naissance||""; inp.oninput = ()=>{ p.naissance=inp.value; refresh(true); };
+  const inp = nb.querySelector("input"); inp.value = p.naissance||""; inp.oninput = ()=>{ p.naissance=inp.value; const ri=document.querySelectorAll("#rows tr")[state.sel]?.querySelector("[data-k=naissance]"); if(ri) ri.value=inp.value; refresh(true); };
   box.appendChild(nb);
 }
 function setAll(v, everyone){
@@ -1771,7 +1912,47 @@ $("#lieu").oninput = e=>{ state.lieu=e.target.value; e.target.classList.toggle("
 $("#duree").oninput = e=>{ state.duree=e.target.value; state.dureeManual=true; refresh(true); };
 $("#fTitre").onchange = e=>{ state.fTitre=e.target.value; refresh(); };
 
-/* ZIP de tous les documents : 3 dossiers, un PDF par participant */
+/* documents scannés à joindre au ZIP (étape 3) : conservés en mémoire seulement, non enregistrés avec la session */
+const SCANS = [
+  {k:"fiches",  label:"Fiches d’évaluation formatives (scannées)", dir:"Fiches_evaluation_scannees"},
+  {k:"grilles", label:"Grilles de certification (scannées)",       dir:"Grilles_certification_scannees"},
+  {k:"emarg",   label:"Feuille d’émargement (scannée)",            dir:"Feuille_emargement_scannee"}
+];
+const scans = {fiches:[], grilles:[], emarg:[]};
+const scanCount = ()=>SCANS.reduce((a,s)=>a+scans[s.k].length,0);
+const scanSize = n => n>=1048576 ? (n/1048576).toFixed(1).replace(".",",")+" Mo" : Math.max(1,Math.round(n/1024))+" Ko";
+function addScans(k, files){
+  const ok = [...files].filter(f=>/\.(pdf|jpe?g|png)$/i.test(f.name)||/^(application\/pdf|image\/(jpeg|png))$/.test(f.type));
+  const ko = files.length - ok.length;
+  ok.forEach(f=>{ if(!scans[k].some(x=>x.name===f.name && x.size===f.size && x.lastModified===f.lastModified)) scans[k].push(f); });
+  if (ko) say("warn", ko+" fichier(s) ignoré(s) : seuls les PDF, JPG et PNG sont acceptés.");
+  renderScans();
+}
+function renderScans(){
+  const box = $("#scanBox"); if(!box) return; box.innerHTML="";
+  SCANS.forEach(s=>{
+    const g = document.createElement("div"); g.className="scanGrp";
+    g.innerHTML = `<div class="scanHead"><strong>${s.label}</strong><button type="button">Ajouter des fichiers…</button></div><ul class="scanList"></ul>`;
+    const inp = document.createElement("input"); inp.type="file"; inp.multiple=true; inp.hidden=true; inp.accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+    inp.onchange = ()=>{ addScans(s.k,[...inp.files]); inp.value=""; };
+    g.querySelector("button").onclick = ()=>inp.click();
+    ["dragover","dragenter"].forEach(ev=>g.addEventListener(ev,e=>{e.preventDefault();g.classList.add("over");}));
+    ["dragleave","drop"].forEach(ev=>g.addEventListener(ev,e=>{e.preventDefault();g.classList.remove("over");}));
+    g.addEventListener("drop",e=>addScans(s.k,[...e.dataTransfer.files]));
+    const ul = g.querySelector("ul");
+    if (!scans[s.k].length){ const li=document.createElement("li"); li.innerHTML='<span class="n hint">Aucun fichier</span>'; ul.appendChild(li); }
+    scans[s.k].forEach((f,i)=>{
+      const li=document.createElement("li");
+      li.innerHTML=`<span class="n">${esc(f.name)}</span><span class="s">${scanSize(f.size)}</span><button type="button" title="Retirer ce fichier" aria-label="Retirer ${esc(f.name)}">×</button>`;
+      li.querySelector("button").onclick=()=>{ scans[s.k].splice(i,1); renderScans(); };
+      ul.appendChild(li);
+    });
+    g.appendChild(inp); box.appendChild(g);
+  });
+}
+renderScans();
+
+/* ZIP de tous les documents : 3 dossiers (un PDF par participant) + dossier optionnel des scans */
 $("#zAll").onclick = async ()=>{
   if(!attMsg()) return;
   const g = effGrille(), all = state.participants, att = attTargets();
@@ -1786,8 +1967,20 @@ $("#zAll").onclick = async ()=>{
       f2.file(name(p,"Grille_certification_SST_")+".pdf", buildGrilles([p]).output("arraybuffer"));
     }
     for (const p of att) f3.file(name(p,attName(p).slice(0,attName(p).length-fname(p).length))+".pdf", buildAttest([p]).output("arraybuffer"));
+    const nS = scanCount();
+    if (nS){
+      const f4 = z.folder("4_Documents_scannes");
+      for (const s of SCANS){ if(!scans[s.k].length) continue;
+        const d = f4.folder(s.dir), seen = {};
+        for (const f of scans[s.k]){
+          let n = f.name.replace(/[\\/:*?"<>|]+/g,"_"); const k = n.toLowerCase(); seen[k]=(seen[k]||0)+1;
+          if (seen[k]>1){ const i=n.lastIndexOf("."); n = i>0 ? n.slice(0,i)+"_"+seen[k]+n.slice(i) : n+"_"+seen[k]; }
+          d.file(n, f);
+        }
+      }
+    }
     save(await z.generateAsync({type:"blob",compression:"DEFLATE"}),"Documents_SST_"+gTag()+(state.fin?"_"+fileSafe(state.fin):"")+".zip");
-    say("ok","ZIP généré : "+all.length+" fiche(s), "+all.length+" grille(s), "+att.length+" attestation(s).");
+    say("ok","ZIP généré : "+all.length+" fiche(s), "+all.length+" grille(s), "+att.length+" attestation(s)"+(nS?", "+nS+" document(s) scanné(s).":"."));
   }catch(e){ say("err","Génération impossible : "+esc(e.message||String(e))+"."); }
   btn.textContent = label; btn.disabled = false;
 };
