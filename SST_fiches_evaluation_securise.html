@@ -43,6 +43,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 button.small{padding:3px 8px;font-size:13px}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 td.bd{width:116px}
+td.bd input.fromxls{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.dn{color:var(--muted);font-size:12.5px;font-weight:400;white-space:nowrap}.dn.ko{color:var(--warn)}.dn.ok{color:var(--ok)}
+#xlsMsg details{margin-top:6px;font-size:13px}#xlsMsg details ul{margin:4px 0 0;padding-left:18px}#xlsMsg details li{margin:1px 0}
 .birthBox{margin-top:14px;padding-top:10px;border-top:1px solid var(--line)}
 .birthBox.over{background:color-mix(in srgb,var(--brand) 8%,transparent)}
 #xlsMsg .ok,#xlsMsg .warn,#xlsMsg .err{display:block;margin-top:4px;font-size:13px}
@@ -65,7 +68,11 @@ td.n{width:28px;color:var(--muted);text-align:center;cursor:pointer}
 td.btns{width:90px;white-space:nowrap;text-align:right}
 #msg{margin-top:10px;font-size:13.5px}
 #msg .ok{color:var(--ok)} #msg .warn{color:var(--warn)} #msg .err{color:var(--danger)}
-#previewWrap{position:sticky;top:12px}
+/* bandeau supérieur (titre + onglets des étapes) figé en haut de page */
+#topbar{position:sticky;top:0;z-index:30;background:var(--bg);border-bottom:1px solid var(--line);padding-bottom:8px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+#topbar header{padding-top:10px}
+#topbar #stepnav{margin-top:6px}
+#previewWrap{position:sticky;top:calc(var(--topbar-h,0px) + 12px)}
 
 .hint{color:var(--muted);font-size:13px;margin:4px 0 0}
 .champ-manquant{border-color:#dc2626 !important;background:#fef2f2}
@@ -127,6 +134,7 @@ body:not(.locked) #authGate{display:none}
   <div class="card" id="authWait"><h1>Chargement…</h1><p class="sub" id="authWaitTxt">Vérification de l'accès.</p></div>
 </div>
 
+<div id="topbar">
 <header>
   <div class="brand">
     <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty" hidden></a>
@@ -141,6 +149,7 @@ body:not(.locked) #authGate{display:none}
   <button role="tab" data-s="2" aria-selected="false">2 · Grilles de certification</button>
   <button role="tab" data-s="3" aria-selected="false">3 · Attestations</button>
 </nav>
+</div>
 <main>
   <div class="col">
     <section class="card" id="sessCard">
@@ -185,6 +194,8 @@ body:not(.locked) #authGate{display:none}
       </div>
       <label for="lieu">Lieu de la formation</label>
       <input type="text" id="lieu" placeholder="Rouen">
+      <label for="session">N° de session <span class="hint">(repris de l’émargement ou de la fiche Excel ; sert au nom du ZIP)</span></label>
+      <input type="text" id="session" placeholder="3868">
       <label for="formateur">Nom du formateur</label>
       <input type="text" id="formateur" placeholder="Prénom NOM">
       <label>Type de formation (case cochée sur la fiche)</label>
@@ -296,7 +307,7 @@ body:not(.locked) #authGate{display:none}
         <div class="actions">
           <button id="zAll" class="primary" disabled>Télécharger tous les documents (.zip)</button>
         </div>
-        <p class="hint">Le ZIP regroupe, en trois dossiers, les fiches d’évaluation, les grilles de certification et les attestations cochées : un PDF par participant. Les documents scannés ajoutés ci-dessus sont joints dans un quatrième dossier, 4_Documents_scannes.</p>
+        <p class="hint">Le ZIP regroupe, en trois dossiers, les fiches d’évaluation, les grilles de certification et les attestations cochées : un PDF par participant. Les documents scannés ajoutés ci-dessus sont joints dans un quatrième dossier, 4_Documents_scannes. Le ZIP est nommé « AAAAMMJJ_N°session_Documents_SST_type » (date de début de session).</p>
         <p class="hint">Fichiers nommés Attestation_…_prénom_nom. Sans certification, la ligne « a obtenu / a renouvelé son certificat » n’est pas imprimée.</p>
       </section>
     </div>
@@ -768,7 +779,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 "use strict";
 /* ---------- utilitaires ---------- */
 const $ = s => document.querySelector(s);
-const state = { formation:"", dates:"", debut:"", fin:"", formateur:"", type:"", participants:[], sel:0, step:1, grille:"auto", certDate:"", sig:null, fNom:"", fPrenom:"", fManual:false, certManual:false, lieu:"", fTitre:"", duree:"", dureeManual:false };
+const state = { formation:"", dates:"", debut:"", fin:"", formateur:"", type:"", participants:[], sel:0, step:1, grille:"auto", certDate:"", sig:null, fNom:"", fPrenom:"", fManual:false, certManual:false, lieu:"", session:"", fTitre:"", duree:"", dureeManual:false };
 try { state.formateur = localStorage.getItem("sst_formateur") || ""; state.sig = JSON.parse(localStorage.getItem("sst_sig")||"null"); } catch(e){}
 
 const MONTHS = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
@@ -827,8 +838,9 @@ function fmtDates(list){
   return `du ${full(a)} au ${full(b)}`;
 }
 function parseSession(lines){
-  const out = {formation:"",dates:[],formateur:"",lieu:"",people:[],format:""};
+  const out = {formation:"",dates:[],formateur:"",lieu:"",people:[],format:"",session:""};
   const all = lines.map(l=>l.text);
+  for (const t of all){ const m = t.match(/(?:Code session|N°\s*(?:de\s*)?session|Numéro\s*(?:de\s*)?session|Session\s*n°)\s*:?\s*([A-Za-z0-9][\w\-\/]*)/i); if (m){ out.session = m[1]; break; } }   // « Code session 3868 »
   const isV2 = all.some(t=>/Nom et prénom des participants/i.test(t));
   const isV1 = all.some(t=>/Nom\s*-\s*Prénom/i.test(t));
   const isV3 = all.some(t=>/^([DF]\d{4,}|\S+@\S+\.\S+)$/i.test(t));
@@ -915,6 +927,7 @@ async function importFiles(files){
       if (res.formation && !state.formation) state.formation = res.formation;
       if (res.formateur && !state.formateur) state.formateur = res.formateur;
       if (res.lieu && !state.lieu) state.lieu = res.lieu;
+      if (res.session && !state.session) state.session = res.session;
       const d = fmtDates(res.dates); if (d && !state.dates) state.dates = d;
       const two = n=>String(n).padStart(2,"0"), full = a=>`${two(a[0])}/${two(a[1])}/${a[2]}`;
       if (res.dates.length){ if(!state.debut) state.debut = full(res.dates[0]); if(!state.fin) state.fin = full(res.dates[res.dates.length-1]); }
@@ -996,6 +1009,12 @@ async function readFicheXlsx(buf){
         const naissance = (cols.corr && parseDateCell(r[cols.corr])) || parseDateCell(r[cols.naiss]);
         out.push({nom, prenom, naissance, tok:nameTokens(nom+" "+prenom)});
       }
+      let sess = "";                                       // cellule « SESSION » suivie de « n° 536 » au-dessus de l'en-tête
+      for (const r of rows.slice(0,i)){
+        const ks = Object.keys(r).sort((a,b)=>a.length-b.length||a.localeCompare(b));
+        for (let j=0;j<ks.length-1 && !sess;j++) if (hn(r[ks[j]])==="session"){ const m = String(r[ks[j+1]]??"").match(/(\d[\w\-\/]*)/); if (m) sess = m[1]; }
+      }
+      out.session = sess;
       return out;
     }
   }
@@ -1004,7 +1023,7 @@ async function readFicheXlsx(buf){
 function applyFiche(){
   const box = $("#xlsMsg"); if (!box || !ficheRows.length) return;
   const key = a=>[...a].sort().join(" "), used = new Set();
-  let ok=0, same=0; const keep=[], nodate=[], none=[], lines=[];
+  let ok=0, same=0; const keep=[], nodate=[], none=[], lines=[], det=[];
   for (const p of state.participants){
     const t = nameTokens(p.nom+" "+p.prenom); if (!t.length) continue;
     let cand = ficheRows.filter(r=>!used.has(r) && key(r.tok)===key(t));
@@ -1016,8 +1035,9 @@ function applyFiche(){
     if (!r){ none.push(nm); continue; }
     used.add(r);
     if (!r.naissance){ nodate.push(nm); continue; }
-    if (!p.naissance){ p.naissance = r.naissance; ok++; }
-    else if (p.naissance===r.naissance) same++;
+    det.push(`${esc(nm)} ↔ ${esc((r.prenom+" "+r.nom).trim())} : <b>${esc(r.naissance)}</b>`);
+    if (!p.naissance){ p.naissance = r.naissance; p.nSrc = "xlsx"; ok++; }
+    else if (p.naissance===r.naissance){ p.nSrc = "xlsx"; same++; }
     else keep.push(nm+" (tableau : "+p.naissance+", Excel : "+r.naissance+")");
   }
   const rest = ficheRows.filter(r=>!used.has(r)).map(r=>(r.prenom+" "+r.nom).trim());
@@ -1026,6 +1046,7 @@ function applyFiche(){
   if (nodate.length) lines.push(`<span class="warn">Trouvé(s) mais sans date de naissance valide : ${esc(nodate.join(", "))}.</span>`);
   if (keep.length)   lines.push(`<span class="warn">Date déjà saisie et différente, conservée : ${esc(keep.join(" ; "))}.</span>`);
   if (rest.length)   lines.push(`<span class="warn">Dans l’Excel mais absent(s) des participants : ${esc(rest.join(", "))}.</span>`);
+  if (det.length) lines.push(`<details open><summary>Détail du rapprochement (participant ↔ ligne de l’Excel : date)</summary><ul>${det.map(x=>"<li>"+x+"</li>").join("")}</ul></details>`);
   box.innerHTML = lines.join("");
   renderRows(); if (state.step===2) renderEval(); refresh();
 }
@@ -1033,6 +1054,7 @@ async function importFiche(f){
   const box = $("#xlsMsg");
   try{
     ficheRows = await readFicheXlsx(await f.arrayBuffer());
+    if (ficheRows.session && !state.session){ state.session = ficheRows.session; syncForm(); }
     if (!ficheRows.length){ box.innerHTML = `<span class="err">${esc(f.name)} : aucune ligne participant trouvée dans l’onglet.</span>`; return; }
     if (!state.participants.length){ box.innerHTML = `<span class="ok">${esc(f.name)} : ${ficheRows.length} ligne(s) lue(s). Les dates seront rapprochées dès que les participants seront importés.</span>`; return; }
     applyFiche();
@@ -1188,6 +1210,7 @@ function marquerChampsManquants(){
   });
 }
 function syncForm(){
+  $("#session").value = state.session||"";
   $("#formation").value = state.formation; $("#dates").value = state.dates; $("#formateur").value = state.formateur; $("#debut").value = state.debut; $("#fin").value = state.fin; $("#cert").value = state.certDate; $("#lieu").value = state.lieu; $("#fTitre").value = state.fTitre; $("#duree").value = state.duree; syncFormateur();
   document.querySelectorAll("input[name=type]").forEach(r=>r.checked = r.value===state.type);
 }
@@ -1200,10 +1223,10 @@ function renderRows(){
       <td><input type="text" data-k="prenom" aria-label="Prénom"></td>
       <td class="bd"><input type="text" data-k="naissance" placeholder="jj/mm/aaaa" aria-label="Date de naissance"></td>
       <td class="btns"><button class="small" data-a="swap" title="Inverser nom et prénom">⇄</button> <button class="small" data-a="del" title="Supprimer">✕</button></td>`;
-    tr.querySelector('[data-k=nom]').value = p.nom; tr.querySelector('[data-k=prenom]').value = p.prenom; tr.querySelector('[data-k=naissance]').value = p.naissance||"";
+    tr.querySelector('[data-k=nom]').value = p.nom; tr.querySelector('[data-k=prenom]').value = p.prenom; tr.querySelector('[data-k=naissance]').value = p.naissance||""; if (p.nSrc==="xlsx" && p.naissance){ const nb=tr.querySelector('[data-k=naissance]'); nb.classList.add("fromxls"); nb.title="Date issue de la fiche de renseignements (Excel)"; }
     tr.querySelectorAll("input").forEach(inp=>{
       inp.addEventListener("focus",()=>{ if(state.sel!==i){ state.sel=i; markSel(); refresh(); } });
-      inp.addEventListener("input",()=>{ p[inp.dataset.k]=inp.value; if(p.chk && inp.dataset.k!=="naissance"){ delete p.chk; tr.classList.remove("uncertain"); } refresh(true); });
+      inp.addEventListener("input",()=>{ p[inp.dataset.k]=inp.value; if(inp.dataset.k==="naissance"){ delete p.nSrc; inp.classList.remove("fromxls"); inp.removeAttribute("title"); } else if(p.chk){ delete p.chk; tr.classList.remove("uncertain"); } refresh(true); });
     });
     tr.querySelector(".n").onclick=()=>{ state.sel=i; markSel(); refresh(); };
     tr.querySelector('[data-a=swap]').onclick=()=>{ [p.nom,p.prenom]=[p.prenom.toUpperCase(),titleCase(p.nom)]; state.sel=i; renderRows(); refresh(); };
@@ -1611,7 +1634,7 @@ function renderEval(){
   if (!p){ box.innerHTML = `<p class="hint">Importez ou ajoutez un participant.</p>`; return; }
   p.ev = p.ev||{}; p.ev[g] = p.ev[g]||{}; p.co = p.co||{}; p.co[g] = p.co[g]||{};
   const ev = p.ev[g];
-  const head = document.createElement("div"); head.className="evhead"; head.textContent = (p.prenom+" "+p.nom).trim()||"Participant"; box.appendChild(head);
+  const head = document.createElement("div"); head.className="evhead"; head.innerHTML = esc((p.prenom+" "+p.nom).trim()||"Participant")+" "+(p.naissance?`<span class="dn ok">· né(e) le ${esc(p.naissance)}</span>`:`<span class="dn ko">· date de naissance non renseignée</span>`); box.appendChild(head);
   for (const id of idsOf(g)){
     const row = document.createElement("div"); row.className="evrow";
     row.innerHTML = `<span class="evl">${esc(IND_LABEL[id])}</span>
@@ -1636,7 +1659,7 @@ function renderEval(){
   rec.appendChild(fin); box.appendChild(rec);
   const nb = document.createElement("div"); nb.className="evnaiss";
   nb.innerHTML = `<label>Date de naissance (facultatif)</label><input type="text" placeholder="jj/mm/aaaa" aria-label="Date de naissance">`;
-  const inp = nb.querySelector("input"); inp.value = p.naissance||""; inp.oninput = ()=>{ p.naissance=inp.value; const ri=document.querySelectorAll("#rows tr")[state.sel]?.querySelector("[data-k=naissance]"); if(ri) ri.value=inp.value; refresh(true); };
+  const inp = nb.querySelector("input"); inp.value = p.naissance||""; inp.oninput = ()=>{ p.naissance=inp.value; delete p.nSrc; document.querySelectorAll("#rows tr")[state.sel]?.querySelector("[data-k=naissance]")?.classList.remove("fromxls"); const ri=document.querySelectorAll("#rows tr")[state.sel]?.querySelector("[data-k=naissance]"); if(ri) ri.value=inp.value; refresh(true); };
   box.appendChild(nb);
 }
 function setAll(v, everyone){
@@ -1865,7 +1888,7 @@ function renderAtt(){
   state.participants.forEach((p,i)=>{
     const cs = attCert(g,p);
     const row = document.createElement("div"); row.className="evrow"+(i===state.sel?" selrow":"");
-    row.innerHTML = `<label class="chk"><input type="checkbox" ${p.attSkip?"":"checked"} aria-label="Éditer l’attestation"> <span class="evl">${esc((p.prenom+" "+p.nom).trim()||"Participant")}</span></label>
+    row.innerHTML = `<label class="chk"><input type="checkbox" ${p.attSkip?"":"checked"} aria-label="Éditer l’attestation"> <span class="evl">${esc((p.prenom+" "+p.nom).trim()||"Participant")} ${p.naissance?`<span class="dn ok">· ${esc(p.naissance)}</span>`:`<span class="dn ko">· sans date de naissance</span>`}</span></label>
       <select aria-label="Civilité"><option value="">Civilité</option><option>Madame</option><option>Monsieur</option></select>
       <span class="badge ${cs==="A"?"a":cs==="N"?"n":""}">${cs==="A"?"certifié":cs==="N"?"non certifié":"à évaluer"}</span>
       <button class="small" title="Voir cette attestation">Voir</button>`;
@@ -1908,6 +1931,7 @@ $("#aZip").onclick = async ()=>{ if(!attMsg()) return; const l=attTargets(); if(
   const z=new JSZip(), used={};
   for (const p of l){ let n=attName(p); used[n]=(used[n]||0)+1; if(used[n]>1) n+="_"+used[n]; z.file(n+".pdf", buildAttest([p]).output("arraybuffer")); }
   save(await z.generateAsync({type:"blob"}),"Attestations_SST_"+gTag()+(state.fin?"_"+fileSafe(state.fin):"")+".zip"); };
+$("#session").oninput = e=>{ state.session=e.target.value.trim(); refresh(true); };
 $("#lieu").oninput = e=>{ state.lieu=e.target.value; e.target.classList.toggle("champ-manquant", !e.target.value); refresh(true); };
 $("#duree").oninput = e=>{ state.duree=e.target.value; state.dureeManual=true; refresh(true); };
 $("#fTitre").onchange = e=>{ state.fTitre=e.target.value; refresh(); };
@@ -1952,6 +1976,13 @@ function renderScans(){
 }
 renderScans();
 
+/* nom du ZIP final : « AAAAMMJJ_N°session_Documents_SST_type » (date de début de session, sinon de fin) */
+function zipBaseName(){
+  const m = (state.debut||state.fin||"").match(/(\d{1,2})\D+(\d{1,2})\D+(\d{4})/);
+  const dt = m ? m[3]+m[2].padStart(2,"0")+m[1].padStart(2,"0") : "";
+  const sess = String(state.session||"").replace(/[^A-Za-z0-9\-]+/g,"");
+  return [dt, sess, "Documents_SST", gTag()==="MAC"?"MAC":"Initiale"].filter(Boolean).join("_");
+}
 /* ZIP de tous les documents : 3 dossiers (un PDF par participant) + dossier optionnel des scans */
 $("#zAll").onclick = async ()=>{
   if(!attMsg()) return;
@@ -1979,7 +2010,7 @@ $("#zAll").onclick = async ()=>{
         }
       }
     }
-    save(await z.generateAsync({type:"blob",compression:"DEFLATE"}),"Documents_SST_"+gTag()+(state.fin?"_"+fileSafe(state.fin):"")+".zip");
+    save(await z.generateAsync({type:"blob",compression:"DEFLATE"}),zipBaseName()+".zip");
     say("ok","ZIP généré : "+all.length+" fiche(s), "+all.length+" grille(s), "+att.length+" attestation(s)"+(nS?", "+nS+" document(s) scanné(s).":"."));
   }catch(e){ say("err","Génération impossible : "+esc(e.message||String(e))+"."); }
   btn.textContent = label; btn.disabled = false;
@@ -1996,6 +2027,8 @@ $("#fprenom").oninput = e=>{ state.fPrenom=e.target.value; state.fManual=true; r
 $("#sigImport").onclick = ()=>$("#sigFile").click();
 $("#allAcq").onclick = ()=>setAll("A",false); $("#allAcqAll").onclick = ()=>setAll("A",true); $("#allClr").onclick = ()=>setAll(null,true);
 document.querySelectorAll("#stepnav button").forEach(b=>b.onclick=()=>setStep(+b.dataset.s));
+/* le bandeau étant figé, l'aperçu se cale juste dessous */
+(()=>{ const t=$("#topbar"); const set=()=>document.documentElement.style.setProperty("--topbar-h",t.offsetHeight+"px"); set(); if (window.ResizeObserver) new ResizeObserver(set).observe(t); addEventListener("resize",set); })();
 $("#gAll").onclick = ()=>{ if(!grilleMsg()) return; save(buildGrilles(state.participants).output("blob"),"Grilles_certification_SST_"+gTag()+(state.fin?"_"+fileSafe(state.fin):"")+".pdf"); };
 $("#gOne").onclick = ()=>{ if(!grilleMsg()) return; const p=state.participants[state.sel]; save(buildGrilles([p]).output("blob"),"Grille_certification_SST_"+fname(p)+".pdf"); };
 $("#gZip").onclick = async ()=>{
@@ -2006,7 +2039,7 @@ $("#gZip").onclick = async ()=>{
 $("#formateur").addEventListener("input",()=>{ if(!state.fManual) syncFormateur(); });
 
 /* ---- sauvegarde / réouverture de session ---- */
-const SAVE_KEYS = ["formation","dates","debut","fin","formateur","type","grille","certDate","certManual","fNom","fPrenom","fManual","step","sel","lieu","fTitre","duree","dureeManual"];
+const SAVE_KEYS = ["formation","dates","debut","fin","formateur","type","grille","certDate","certManual","fNom","fPrenom","fManual","step","sel","lieu","session","fTitre","duree","dureeManual"];
 function snapshot(){
   const s = {}; for (const k of SAVE_KEYS) s[k]=state[k];
   s.participants = state.participants; s.sig = state.sig;
