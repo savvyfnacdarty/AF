@@ -823,8 +823,14 @@ function splitNomFirst(full){           // "LE BONT AUDREY" -> nom / prénom (no
   return r;
 }
 function splitPrenomFirst(full){        // "MICKAEL LE BRIS" -> prénom / nom
-  const t = full.split(/\s+/); if (t.length===1) return {nom:t[0].toUpperCase(),prenom:""};
-  return {nom:t.slice(1).join(" ").toUpperCase(), prenom:titleCase(t[0])};
+  const t = full.split(/\s+/).filter(Boolean); if (t.length<=1) return {nom:(t[0]||"").toUpperCase(),prenom:""};
+  const up = w=>w===w.toUpperCase(), PART = new Set(["LE","LA","LES","DE","DU","DES","D","DA","DAS","DO","DOS","DI","DEL","VAN","VON","EL","AL","BEN","SAINT","SAINTE","ST"]);
+  let k;
+  if (t.some(w=>!up(w))){ k = t.findIndex((w,j)=>j>0 && up(w)); if (k<0) k = 1; }   // « Gregory MATTERN » : prénom en casse mixte, nom en majuscules
+  else { k = t.length-1; while (k>1 && PART.has(t[k-1])) k--; }                    // « MICKAEL LE BRIS », « JOSE MANUEL SCHMITT »
+  const r = {nom:t.slice(k).join(" ").toUpperCase(), prenom:titleCase(t.slice(0,k).join(" "))};
+  if (t.length>=3 && !t.some(w=>!up(w))) r.chk = true;                               // coupure incertaine
+  return r;
 }
 function fmtDates(list){
   if (!list.length) return "";
@@ -843,7 +849,7 @@ function parseSession(lines){
   for (const t of all){ const m = t.match(/(?:Code session|N°\s*(?:de\s*)?session|Numéro\s*(?:de\s*)?session|Session\s*n°)\s*:?\s*([A-Za-z0-9][\w\-\/]*)/i); if (m){ out.session = m[1]; break; } }   // « Code session 3868 »
   const isV2 = all.some(t=>/Nom et prénom des participants/i.test(t));
   const isV1 = all.some(t=>/Nom\s*-\s*Prénom/i.test(t));
-  const isV3 = all.some(t=>/^([DF]\d{4,}|\S+@\S+\.\S+)$/i.test(t));
+  const isV3 = all.some(t=>/^([DF]\d{4,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\S+@\S+\.\S+)$/i.test(t));
 
   if (isV2){
     out.format = "Émargement « Intitulé de la session / Code session »";
@@ -892,15 +898,32 @@ function parseSession(lines){
   } else if (isV3){
     out.format = "Émargement avec matricule / site";
     let head = [], seenMatin=false;
-    for (let i=0;i<lines.length;i++){
-      const t = lines[i].text; let m;
+    /* colonne de gauche seule sous l'en-tête « Matin » : « Absent », « Il est passé au SAV »
+       et les horodatages de signature ne doivent pas se coller au nom / matricule / site */
+    const iM = lines.findIndex(l=>l.items.some(x=>/^Matin\b/i.test(x.s)));
+    let xCut = Infinity;
+    if (iM>=0){
+      let xMin = Infinity;
+      lines.slice(iM+1).forEach(l=>l.items.forEach(x=>{ if (x.x<xMin) xMin = x.x; }));
+      xCut = Math.min(lines[iM].items.find(x=>/^Matin\b/i.test(x.s)).x - 25, xMin + 100);
+    }
+    const L3 = lines.map((l,idx)=>{
+      if (idx<=iM) return l;
+      const it = l.items.filter(x=>x.x<xCut);
+      return {y:l.y, items:it, text:it.map(x=>x.s).join(" ").replace(/\s+/g," ").trim()};
+    }).filter(l=>l.text);
+    for (let i=0;i<L3.length;i++){
+      const t = L3[i].text; let m;
       if (!seenMatin) head.push(t);
       if (/^Matin\b/i.test(t)) seenMatin = true;
       if ((m=t.match(/^Description\s+(.+)/i)) && !out.formation) out.formation = m[1].trim();
       if ((m=t.match(/^Formateur\(s\)\s+(.+)/i)) && !out.formateur) out.formateur = m[1].trim();
       if ((m=t.match(/^Lieu de la formation\s+(.+)/i)) && !out.lieu) out.lieu = m[1].trim();
-      if (/^([DF]\d{4,}|\S+@\S+\.\S+)$/i.test(t) && i>0){
-        const prev = lines[i-1].text;
+      if (/^([DF]\d{4,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\S+@\S+\.\S+)$/i.test(t) && i>0){
+        let prev = L3[i-1].text;
+        /* prénom et nom sur deux lignes consécutives (« NICOLAS » / « LALOIRE ») */
+        const p2 = i>1 ? L3[i-2] : null;
+        if (p2 && Math.abs(p2.y - L3[i-1].y) < 24 && NAME_RE.test(p2.text) && !/^(Matin|Après)/i.test(p2.text)) prev = p2.text + " " + prev;
         if (NAME_RE.test(prev) && !/^(Matin|Après)/i.test(prev)) out.people.push(splitPrenomFirst(prev));
       }
     }

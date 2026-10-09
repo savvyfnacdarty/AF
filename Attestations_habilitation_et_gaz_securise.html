@@ -2201,9 +2201,10 @@ function isBareDateLine(t){
   return /^[A-Za-zÀ-ÿ]+\s+\d{1,2}(?:er)?\s+[A-Za-zÀ-ÿ]+\.?\s+\d{4}$/.test(CLEAN(t));
 }
 
-const RE_MATRICULE = /^[DF]\d{3,9}$/;
+/* matricule : Dxxxxx / Fxxxxx, ou identifiant GUID (ex. 53836761-6c2c-48c6-a88a-16202bef0e01) */
+const RE_MATRICULE = /^(?:[DF]\d{3,9}|[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})$/;
 function isMatricule(t){ return RE_MATRICULE.test(CLEAN(t).replace(/\s+/g,"").toUpperCase()); }
-function cleanMatricule(t){ return CLEAN(t).replace(/\s+/g,"").toUpperCase(); }
+function cleanMatricule(t){ const c = CLEAN(t).replace(/\s+/g,""); return /^[DF]/i.test(c) ? c.toUpperCase() : c; }
 /* une adresse e-mail saisie à la place du matricule (présence de « @ ») :
    elle n'est jamais affichée comme matricule, le champ reste vide. */
 function hasEmail(t){ return /@/.test(String(t==null?"":t)); }
@@ -2409,7 +2410,7 @@ function parseV3(items, lines, warnings){
     if(!t) continue;
     if(/^page\s*\d/i.test(t)) continue;
     if(/^(matin|apr[èe]s-midi)(\s+(matin|apr[èe]s-midi))?$/i.test(t)) continue;
-    if(/^[0-9A-F]{20,}(-[0-9A-F]{20,})?$/i.test(t.replace(/[\s-]+/g,""))) continue;
+    if(!isMatricule(t) && /^[0-9A-F]{20,}(-[0-9A-F]{20,})?$/i.test(t.replace(/[\s-]+/g,""))) continue;
     if(isBareDateLine(t)) continue;
     const right = CLEAN(l.items.filter(it=> it.x >= xCut).map(txtOf).join(" "));
     body.push({t, y:l.y, size:Math.max(...left.map(it=>it.size||10)), absent:/absent/i.test(right)});
@@ -2710,7 +2711,7 @@ function parseV4(items, lines, warnings, opts){
     if(!full) continue;
     if(/^page\s*\d/i.test(full)) continue;
     if(isBareDateLine(full)) continue;
-    if(/^[0-9A-F]{20,}(-[0-9A-F]{20,})?$/i.test(full.replace(/[\s-]+/g,""))) continue;
+    if(!isMatricule(full) && /^[0-9A-F]{20,}(-[0-9A-F]{20,})?$/i.test(full.replace(/[\s-]+/g,""))) continue;
     if(/^(le\s+)?formateur|^signature\s+du|^signatures?\s+des\s+formateur|^cachet|^visa\b/i.test(full)) break;
 
     const cells = {};
@@ -4984,11 +4985,11 @@ function doImport(){
     let parts = l.includes("\t") ? l.split("\t") : (l.includes(";") ? l.split(";") : l.split(/\s{2,}/));
     parts = parts.map(p=>p.trim()).filter(p=>p!=="");
     let o = blankRow();
-    /* un matricule Dxxxxx / Fxxxxx peut occuper n'importe quelle colonne */
+    /* un matricule Dxxxxx / Fxxxxx (ou GUID) peut occuper n'importe quelle colonne */
     let mat = "";
     /* une adresse e-mail n'est ni un matricule ni un nom : elle est ignorée */
     parts = parts.filter(p=>!hasEmail(p));
-    parts = parts.filter(p=>{ if(!mat && isMatricule(p)){ mat = p.trim().toUpperCase(); return false; } return true; });
+    parts = parts.filter(p=>{ if(!mat && isMatricule(p)){ mat = cleanMatricule(p); return false; } return true; });
     o.matricule = mat;
     if(parts.length>=5){ o.filiale=parts[0]; o.site=parts[1]; o.etab=parts[2]; o.nom=parts[3]; o.prenom=parts[4]; }
     else if(parts.length===4){ o.filiale=parts[0]; o.site=parts[1]; o.nom=parts[2]; o.prenom=parts[3]; }
