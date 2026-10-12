@@ -310,7 +310,7 @@ body:not(.locked) #authGate{display:none}
         <div class="actions">
           <button id="zAll" class="primary" disabled>Télécharger tous les documents (.zip)</button>
         </div>
-        <p class="hint">Le ZIP regroupe, en trois dossiers, les fiches d’évaluation, les grilles de certification et les attestations cochées : un PDF par participant. Les documents scannés ajoutés ci-dessus sont joints dans un quatrième dossier, 4_Documents_scannes. Il contient aussi, à la racine, la sauvegarde .json de la session. Le ZIP est nommé « Date_Périmètre_Thème » (ex. 2026-03-15_SIEGE_SST_INI).</p>
+        <p class="hint">Le ZIP regroupe, en trois dossiers, les fiches d’évaluation, les grilles de certification et les attestations cochées : un PDF par participant. Les documents scannés ajoutés ci-dessus sont joints dans un quatrième dossier, 4_Documents_scannes. Il contient aussi, à la racine, la sauvegarde .json de la session. Le ZIP est nommé « Date_Périmètre_Thème_N°session » (ex. 2026-03-15_SIEGE_SST_INI_4184).</p>
         <p class="hint">Fichiers nommés Att_SST_INI_Prenom.Nom (Att_SST_MAC_… pour le MAC). Sans certification, la ligne « a obtenu / a renouvelé son certificat » n’est pas imprimée.</p>
       </section>
     </div>
@@ -807,12 +807,16 @@ function dateSessionISO(){
   }
   const d = new Date(); return new Date(d - d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
 }
-const sessionBase = () => dateSessionISO()+"_"+state.perimetre+"_"+themeSST();
+const numeroFichier = () => String(state.session||"").trim().replace(/[^A-Za-z0-9\-]+/g,"-").replace(/^-+|-+$/g,"");
+/* Date_Périmètre_Thème_N°session — ex. 2026-09-15_EXP-DGO_SST_INI_4184 */
+const sessionBase = () => dateSessionISO()+"_"+state.perimetre+"_"+themeSST()+"_"+numeroFichier();
 /* contrôle bloquant : aucun fichier n'est généré sans périmètre */
 function reqPerimetre(){
-  if (PERIMETRES.includes(state.perimetre)) return true;
-  const el = $("#perimetre"); el.classList.add("champ-manquant");
-  $("#perimErr").innerHTML = '<div class="err">Renseignez « Identification périmètre de formation » : ce champ est obligatoire, il sert à nommer tous les fichiers générés.</div>';
+  const okP = PERIMETRES.includes(state.perimetre), okN = !!numeroFichier();
+  if (okP && okN) return true;
+  const el = okP ? $("#session") : $("#perimetre"); el.classList.add("champ-manquant");
+  $("#perimErr").innerHTML = okP ? '<div class="err">Renseignez le « N° de session » : il est obligatoire, il fait partie du nom des fichiers générés.</div>'
+    : '<div class="err">Renseignez « Identification périmètre de formation » : ce champ est obligatoire, il sert à nommer tous les fichiers générés.</div>';
   try{ el.scrollIntoView({block:"center"}); el.focus(); }catch(e){}
   return false;
 }
@@ -1983,7 +1987,7 @@ $("#aZip").onclick = async ()=>{ if(!attMsg()) return; const l=attTargets(); if(
   const z=new JSZip(), used={};
   for (const p of l){ let n=attName(p); used[n]=(used[n]||0)+1; if(used[n]>1) n+="_"+used[n]; z.file(n+".pdf", buildAttest([p]).output("arraybuffer")); }
   save(await z.generateAsync({type:"blob"}),sessionBase()+"_Attestations.zip"); };
-$("#session").oninput = e=>{ state.session=e.target.value.trim(); refresh(true); };
+$("#session").oninput = e=>{ state.session=e.target.value.trim(); e.target.classList.remove("champ-manquant"); refresh(true); };
 $("#perimetre").onchange = e=>{ state.perimetre=e.target.value; e.target.classList.toggle("champ-manquant", !state.perimetre); if(state.perimetre) $("#perimErr").innerHTML=""; refresh(true); };
 $("#lieu").oninput = e=>{ state.lieu=e.target.value; e.target.classList.toggle("champ-manquant", !e.target.value); refresh(true); };
 $("#duree").oninput = e=>{ state.duree=e.target.value; state.dureeManual=true; refresh(true); };

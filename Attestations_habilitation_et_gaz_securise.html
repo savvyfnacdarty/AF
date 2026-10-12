@@ -3697,7 +3697,10 @@ function fullName(r){ return [(r.nom||"").toUpperCase(), r.prenom].filter(Boolea
 const PERIMETRES = ["EXP-FNAC","EXP-DGO","EXP-DIF","EXP-DGE","OPE-DGO","OPE-DIF","OPE-DGE","OPE-FNAC","SIEGE"];
 function themeCode(){ return S.session.type==="gaz" ? "GAZ" : "HE"; }
 function dateSessionISO(){ return String(S.session.dateDebut || S.session.dateFin || todayISO()).slice(0,10); }
-function sessionBase(){ return dateSessionISO() + "_" + S.session.perimetre + "_" + themeCode(); }
+/* n° de session nettoyé pour un nom de fichier (ex. « HE 3552 » -> « HE-3552 ») */
+function numeroFichier(){ return String(S.session.numero||"").trim().replace(/[^A-Za-z0-9\-]+/g,"-").replace(/^-+|-+$/g,""); }
+/* Date_Périmètre_Thème_N°session — ex. 2026-09-15_EXP-DGO_HE_4184 */
+function sessionBase(){ return dateSessionISO() + "_" + S.session.perimetre + "_" + themeCode() + "_" + numeroFichier(); }
 /* nom de fichier sûr : sans accent, sans espace ni caractère interdit — « Prenom.Nom » */
 const TRANSLIT = {"œ":"oe","Œ":"Oe","æ":"ae","Æ":"Ae","ß":"ss","ø":"o","Ø":"O","đ":"d","Đ":"D","ł":"l","Ł":"L","ı":"i","þ":"th","Þ":"Th"};
 function partFichier(v){
@@ -3712,11 +3715,13 @@ const nomAtt   = r => "Att_" + themeCode() + "_" + personneFichier(r) + ".pdf";
 const nomTitre = (r, ext) => "Titre_HE_" + personneFichier(r) + "." + (ext||"pdf");
 /* contrôle bloquant : aucun fichier n'est généré sans périmètre */
 function requirePerimetre(){
-  if(PERIMETRES.indexOf(S.session.perimetre)>=0) return true;
+  const okP = PERIMETRES.indexOf(S.session.perimetre)>=0, okN = !!numeroFichier();
+  if(okP && okN) return true;
   setTab("saisie");
-  const el = $("#s-perimetre");
+  const el = $(okP ? "#s-numero" : "#s-perimetre");
   if(el){ el.classList.add("vide"); try{ el.scrollIntoView({block:"center"}); el.focus(); }catch(e){} }
-  alert("Renseignez d'abord « Identification périmètre de formation » (onglet 1, Informations de session) : ce champ est obligatoire, il sert à nommer tous les fichiers générés.");
+  alert(okP ? "Renseignez d'abord le « N° / code de session » (onglet 1, Informations de session) : il est obligatoire, il fait partie du nom des fichiers générés."
+            : "Renseignez d'abord « Identification périmètre de formation » (onglet 1, Informations de session) : ce champ est obligatoire, il sert à nommer tous les fichiers générés.");
   return false;
 }
 /* ---------------- sauvegarde complète de la session (.json) ---------------- */
