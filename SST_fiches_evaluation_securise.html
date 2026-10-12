@@ -68,6 +68,7 @@ td.n{width:28px;color:var(--muted);text-align:center;cursor:pointer}
 td.btns{width:90px;white-space:nowrap;text-align:right}
 #msg{margin-top:10px;font-size:13.5px}
 #msg .ok{color:var(--ok)} #msg .warn{color:var(--warn)} #msg .err{color:var(--danger)}
+#perimErr .err{color:var(--danger);font-size:13px;margin-top:4px}
 /* bandeau supérieur (titre + onglets des étapes) figé en haut de page */
 #topbar{position:sticky;top:0;z-index:30;background:var(--bg);border-bottom:1px solid var(--line);padding-bottom:8px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
 #topbar header{padding-top:10px}
@@ -139,7 +140,7 @@ body:not(.locked) #authGate{display:none}
   <div class="brand">
     <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty" hidden></a>
     <div>
-      <h1>Documents SST <span class="ver" title="Version de l’outil">v1.1</span></h1>
+      <h1>Documents SST <span class="ver" title="Version de l’outil">v1.2</span></h1>
       <p>Importez la feuille d’émargement, vérifiez les participants, puis générez les PDF de chaque étape.</p>
     </div>
   </div>
@@ -184,6 +185,9 @@ body:not(.locked) #authGate{display:none}
 
     <section class="card">
       <h2><span class="num">2</span> Informations de la session</h2>
+      <label for="perimetre">Identification périmètre de formation <span class="hint">(obligatoire ; sert au nom de tous les fichiers générés)</span></label>
+      <select id="perimetre" class="champ-manquant" style="width:100%"><option value="">— Choisir —</option><option>EXP-FNAC</option><option>EXP-DGO</option><option>EXP-DIF</option><option>EXP-DGE</option><option>OPE-DGO</option><option>OPE-DIF</option><option>OPE-DGE</option><option>OPE-FNAC</option><option>SIEGE</option></select>
+      <div id="perimErr" aria-live="polite"></div>
       <label for="formation">Formation (lue sur l’émargement)</label>
       <input type="text" id="formation" placeholder="SAUVETEUR SECOURISTE DU TRAVAIL (SST) - INITIALE">
       <label for="dates">Date(s) inscrite(s) sur la fiche d’évaluation (étape 1)</label>
@@ -194,7 +198,7 @@ body:not(.locked) #authGate{display:none}
       </div>
       <label for="lieu">Lieu de la formation</label>
       <input type="text" id="lieu" placeholder="Rouen">
-      <label for="session">N° de session <span class="hint">(repris de l’émargement ou de la fiche Excel ; sert au nom du ZIP)</span></label>
+      <label for="session">N° de session <span class="hint">(repris de l’émargement ou de la fiche Excel)</span></label>
       <input type="text" id="session" placeholder="3868">
       <label for="formateur">Nom du formateur</label>
       <input type="text" id="formateur" placeholder="Prénom NOM">
@@ -226,7 +230,7 @@ body:not(.locked) #authGate{display:none}
         <button id="dlZip" disabled>ZIP : un PDF par participant</button>
         <button id="dlOne" disabled>PDF du participant affiché</button>
       </div>
-      <p class="hint">Fichiers nommés prénom_nom. Les champs d’évaluation (A/B/C, cas concrets) restent vides pour le formateur.</p>
+      <p class="hint">Fichiers nommés Fiche_evaluation_SST_Prenom.Nom. Les champs d’évaluation (A/B/C, cas concrets) restent vides pour le formateur.</p>
       <p class="hint next">À venir dans le même outil : attestations de formation après la session.</p>
     </section>
     </div>
@@ -280,15 +284,14 @@ body:not(.locked) #authGate{display:none}
         <h2><span class="num">4</span> Attestation de fin de formation</h2>
         <p class="hint" id="attInfo"></p>
         <div class="two">
-          <div><label for="fTitre">Formateur : civilité</label>
-            <select id="fTitre"><option value="">(aucune)</option><option>Madame</option><option>Monsieur</option></select></div>
+          
           <div><label for="duree">Durée affichée</label><input type="text" id="duree" placeholder="14 heures"></div>
         </div>
         <p class="hint">Formateur, lieu, date de fin et type de formation viennent des champs « Session » ; la grille utilisée est celle choisie à l’étape 2.</p>
       </section>
       <section class="card">
         <h2><span class="num">5</span> Participants</h2>
-        <p class="hint">Cochez les attestations à éditer et choisissez la civilité de chacun. Les lignes « Acquise / Reste à acquérir » sont reprises de la grille de certification (C1 → cadre juridique, C2 → protection, C3 → examen, C4 → alerte, C5 → gestes, C7 + C8 → prévention, C6 → information des personnes ad hoc) et restent modifiables.</p>
+        <p class="hint">Cochez les attestations à éditer. Les lignes « Acquise / Reste à acquérir » sont reprises de la grille de certification (C1 → cadre juridique, C2 → protection, C3 → examen, C4 → alerte, C5 → gestes, C7 + C8 → prévention, C6 → information des personnes ad hoc) et restent modifiables.</p>
         <div id="attList"></div>
         <div id="attLines"></div>
       </section>
@@ -307,8 +310,8 @@ body:not(.locked) #authGate{display:none}
         <div class="actions">
           <button id="zAll" class="primary" disabled>Télécharger tous les documents (.zip)</button>
         </div>
-        <p class="hint">Le ZIP regroupe, en trois dossiers, les fiches d’évaluation, les grilles de certification et les attestations cochées : un PDF par participant. Les documents scannés ajoutés ci-dessus sont joints dans un quatrième dossier, 4_Documents_scannes. Le ZIP est nommé « AAAAMMJJ_N°session_Documents_SST_type » (date de début de session).</p>
-        <p class="hint">Fichiers nommés Attestation_…_prénom_nom. Sans certification, la ligne « a obtenu / a renouvelé son certificat » n’est pas imprimée.</p>
+        <p class="hint">Le ZIP regroupe, en trois dossiers, les fiches d’évaluation, les grilles de certification et les attestations cochées : un PDF par participant. Les documents scannés ajoutés ci-dessus sont joints dans un quatrième dossier, 4_Documents_scannes. Il contient aussi, à la racine, la sauvegarde .json de la session. Le ZIP est nommé « Date_Périmètre_Thème » (ex. 2026-03-15_SIEGE_SST_INI).</p>
+        <p class="hint">Fichiers nommés Att_SST_INI_Prenom.Nom (Att_SST_MAC_… pour le MAC). Sans certification, la ligne « a obtenu / a renouvelé son certificat » n’est pas imprimée.</p>
       </section>
     </div>
   </div>
@@ -779,13 +782,40 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 "use strict";
 /* ---------- utilitaires ---------- */
 const $ = s => document.querySelector(s);
-const state = { formation:"", dates:"", debut:"", fin:"", formateur:"", type:"", participants:[], sel:0, step:1, grille:"auto", certDate:"", sig:null, fNom:"", fPrenom:"", fManual:false, certManual:false, lieu:"", session:"", fTitre:"", duree:"", dureeManual:false };
+const state = { formation:"", dates:"", debut:"", fin:"", formateur:"", type:"", participants:[], sel:0, step:1, grille:"auto", certDate:"", sig:null, fNom:"", fPrenom:"", fManual:false, certManual:false, lieu:"", session:"", perimetre:"", duree:"", dureeManual:false };
 try { state.formateur = localStorage.getItem("sst_formateur") || ""; state.sig = JSON.parse(localStorage.getItem("sst_sig")||"null"); } catch(e){}
 
 const MONTHS = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
 const strip = s => s.normalize("NFD").replace(/[̀-ͯ]/g,"");
 const titleCase = s => s.toLowerCase().replace(/(^|[\s\-'’])(\p{L})/gu,(m,a,b)=>a+b.toUpperCase());
 const fileSafe = s => strip(s).replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"");
+
+/* ---- périmètre de formation & nommage ----
+   Fichiers de session : Date_Périmètre_Thème (2026-03-15_SIEGE_SST_INI) ; individuels : Att_SST_INI_Prenom.Nom.pdf */
+const PERIMETRES = ["EXP-FNAC", "EXP-DGO", "EXP-DIF", "EXP-DGE", "OPE-DGO", "OPE-DIF", "OPE-DGE", "OPE-FNAC", "SIEGE"];
+const TRANSLIT = {"œ":"oe","Œ":"Oe","æ":"ae","Æ":"Ae","ß":"ss","ø":"o","Ø":"O","đ":"d","Đ":"D","ł":"l","Ł":"L","ı":"i","þ":"th","Þ":"Th"};
+function partFichier(v){
+  const t = String(v||"").replace(/[œŒæÆßøØđĐłŁıþÞ]/g, c=>TRANSLIT[c]).normalize("NFD").replace(/[̀-ͯ]/g,"");
+  return t.split(/[^A-Za-z0-9]+/).filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join("-");
+}
+const personneFichier = p => [partFichier(p.prenom), partFichier(p.nom)].filter(Boolean).join(".") || "participant";
+function themeSST(){ const g = effGrille(); return g==="mac" ? "SST_MAC" : (g==="initiale" ? "SST_INI" : "SST"); }
+function dateSessionISO(){
+  for (const v of [state.debut, state.fin, state.dates]){
+    const m = String(v||"").match(/(\d{1,2})\D+(\d{1,2})\D+(\d{4})/);
+    if (m) return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+  }
+  const d = new Date(); return new Date(d - d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
+}
+const sessionBase = () => dateSessionISO()+"_"+state.perimetre+"_"+themeSST();
+/* contrôle bloquant : aucun fichier n'est généré sans périmètre */
+function reqPerimetre(){
+  if (PERIMETRES.includes(state.perimetre)) return true;
+  const el = $("#perimetre"); el.classList.add("champ-manquant");
+  $("#perimErr").innerHTML = '<div class="err">Renseignez « Identification périmètre de formation » : ce champ est obligatoire, il sert à nommer tous les fichiers générés.</div>';
+  try{ el.scrollIntoView({block:"center"}); el.focus(); }catch(e){}
+  return false;
+}
 function say(kind, html){ $("#msg").innerHTML = html ? `<div class="${kind}">${html}</div>` : ""; }
 const esc = s => s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -1221,7 +1251,7 @@ function buildDoc(list){
   doc.setProperties({title:DOCUMENTS[0].label});
   return doc;
 }
-const fname = p => (fileSafe(p.prenom)+"_"+fileSafe(p.nom)).replace(/^_|_$/g,"") || "participant";
+const fname = p => personneFichier(p);
 function save(blob,name){ const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),5000); }
 
 /* ---------- interface ---------- */
@@ -1234,7 +1264,7 @@ function marquerChampsManquants(){
 }
 function syncForm(){
   $("#session").value = state.session||"";
-  $("#formation").value = state.formation; $("#dates").value = state.dates; $("#formateur").value = state.formateur; $("#debut").value = state.debut; $("#fin").value = state.fin; $("#cert").value = state.certDate; $("#lieu").value = state.lieu; $("#fTitre").value = state.fTitre; $("#duree").value = state.duree; syncFormateur();
+  $("#formation").value = state.formation; $("#dates").value = state.dates; $("#formateur").value = state.formateur; $("#debut").value = state.debut; $("#fin").value = state.fin; $("#cert").value = state.certDate; $("#lieu").value = state.lieu; $("#perimetre").value = state.perimetre||""; $("#perimetre").classList.toggle("champ-manquant", !state.perimetre); $("#duree").value = state.duree; syncFormateur();
   document.querySelectorAll("input[name=type]").forEach(r=>r.checked = r.value===state.type);
 }
 function renderRows(){
@@ -1311,12 +1341,12 @@ function needInfo(){
   if (state.participants.some(p=>!(p.nom||p.prenom).trim())) miss.push("un participant sans nom");
   if (miss.length){ say("warn","Attention : "+miss.join(", ")+" n’est pas renseigné — la fiche sera exportée avec ce champ vide."); } else say("","");
 }
-$("#dlAll").onclick = ()=>{ needInfo(); const d=buildDoc(state.participants); save(d.output("blob"),"Fiches_evaluation_formative_SST"+(state.dates?"_"+fileSafe(state.dates):"")+".pdf"); };
-$("#dlOne").onclick = ()=>{ needInfo(); const p=state.participants[state.sel]; save(buildDoc([p]).output("blob"),"Fiche_evaluation_SST_"+fname(p)+".pdf"); };
+$("#dlAll").onclick = ()=>{ if(!reqPerimetre()) return; needInfo(); const d=buildDoc(state.participants); save(d.output("blob"),sessionBase()+"_Fiches_evaluation.pdf"); };
+$("#dlOne").onclick = ()=>{ if(!reqPerimetre()) return; needInfo(); const p=state.participants[state.sel]; save(buildDoc([p]).output("blob"),"Fiche_evaluation_SST_"+fname(p)+".pdf"); };
 $("#dlZip").onclick = async ()=>{
-  needInfo(); const z=new JSZip(), used={};
-  for (const p of state.participants){ let n=fname(p); used[n]=(used[n]||0)+1; if(used[n]>1) n+="_"+used[n]; z.file(n+".pdf", buildDoc([p]).output("arraybuffer")); }
-  save(await z.generateAsync({type:"blob"}),"Fiches_evaluation_formative_SST"+(state.dates?"_"+fileSafe(state.dates):"")+".zip");
+  if(!reqPerimetre()) return; needInfo(); const z=new JSZip(), used={};
+  for (const p of state.participants){ let n=fname(p); used[n]=(used[n]||0)+1; if(used[n]>1) n+="_"+used[n]; z.file("Fiche_evaluation_SST_"+n+".pdf", buildDoc([p]).output("arraybuffer")); }
+  save(await z.generateAsync({type:"blob"}),sessionBase()+"_Fiches_evaluation.zip");
 };
 
 
@@ -1741,6 +1771,7 @@ function setStep(n){
   refresh();
 }
 function grilleMsg(){
+  if(!reqPerimetre()) return false;
   const g = effGrille();
   if (!g){ say("warn","Type de formation non défini : choisissez « Formation initiale » ou « MAC » (ou une grille ci-dessus)."); return false; }
   const miss=[]; if(!state.debut) miss.push("la date de début"); if(!state.fin) miss.push("la date de fin");
@@ -1838,13 +1869,13 @@ function drawAttest(doc, g, d){
   // corps
   T("L’Académie Fnac Darty organisme de formation déclaré sous le n° 11 94 08 240 94, auprès du RCS",100,221,{size:10,maxW:640});
   T("de Créteil 775 661 390, atteste que :",100,241,{size:10});
-  const who = [d.titre, (d.nom||"").toUpperCase(), d.prenom].filter(Boolean).join(" ");
+  const who = [(d.nom||"").toUpperCase(), d.prenom].filter(Boolean).join(" ");
   T(who,413,275,{style:"bold",size:10.5,align:"center",maxW:640});
   T("A suivi, dans le cadre d’une action de Formation Professionnelle Continue relevant de la loi n°2018-",100,308,{size:10,maxW:640});
   T("771 du 5 septembre 2018 pour la liberté de choisir son avenir professionnel, la formation suivante",100,324,{size:10,maxW:640});
   const pre = g==="mac" ? "dispensée par : " : "dispensée par Formateur : ";
   const w2 = T(pre,100,340,{size:10});
-  const fm = [d.fTitre, (d.fNom||"").toUpperCase(), d.fPrenom].filter(Boolean).join(" ");
+  const fm = [(d.fNom||"").toUpperCase(), d.fPrenom].filter(Boolean).join(" ");
   T(fm,100+w2,340,{style:"bold",size:10});
   // tableau 1
   const [t0,t1,t2,t3] = A.t1, x0=50, x1=789;
@@ -1890,7 +1921,7 @@ function drawAttest(doc, g, d){
 }
 
 function attData(p,g){
-  return { titre:p.titre||"", nom:p.nom, prenom:p.prenom, fTitre:state.fTitre, fNom:state.fNom, fPrenom:state.fPrenom,
+  return { nom:p.nom, prenom:p.prenom, fNom:state.fNom, fPrenom:state.fPrenom,
     duree:state.duree||ATT[g].duree, lieu:state.lieu, fin:state.fin, lines:attLineStates(g,p), cert:attCert(g,p) };
 }
 function buildAttest(list){
@@ -1912,11 +1943,8 @@ function renderAtt(){
     const cs = attCert(g,p);
     const row = document.createElement("div"); row.className="evrow"+(i===state.sel?" selrow":"");
     row.innerHTML = `<label class="chk"><input type="checkbox" ${p.attSkip?"":"checked"} aria-label="Éditer l’attestation"> <span class="evl">${esc((p.prenom+" "+p.nom).trim()||"Participant")} ${p.naissance?`<span class="dn ok">· ${esc(p.naissance)}</span>`:`<span class="dn ko">· sans date de naissance</span>`}</span></label>
-      <select aria-label="Civilité"><option value="">Civilité</option><option>Madame</option><option>Monsieur</option></select>
       <span class="badge ${cs==="A"?"a":cs==="N"?"n":""}">${cs==="A"?"certifié":cs==="N"?"non certifié":"à évaluer"}</span>
       <button class="small" title="Voir cette attestation">Voir</button>`;
-    const sel = row.querySelector("select"); sel.value = p.titre||"";
-    sel.onchange = ()=>{ p.titre = sel.value; state.sel=i; markSelOnly(); refresh(); };
     row.querySelector("input").onchange = e=>{ p.attSkip = !e.target.checked; refresh(); };
     row.querySelector("button").onclick = ()=>{ state.sel=i; markSel(); refresh(); };
     box.appendChild(row);
@@ -1938,6 +1966,7 @@ function renderAtt(){
 }
 function markSelOnly(){ document.querySelectorAll("#rows tr").forEach((tr,i)=>tr.classList.toggle("sel",i===state.sel)); }
 function attMsg(){
+  if(!reqPerimetre()) return false;
   const g = effGrille();
   if (!g){ say("warn","Type de formation non défini : choisissez « Formation initiale » ou « MAC »."); return false; }
   const miss=[]; if(!state.lieu) miss.push("le lieu"); if(!state.fin) miss.push("la date de fin"); if(!state.fNom&&!state.fPrenom) miss.push("le formateur");
@@ -1946,18 +1975,18 @@ function attMsg(){
   if (notCert) m += notCert+" attestation(s) sans la ligne « a obtenu / a renouvelé le certificat » (participant non certifié ou non évalué).";
   say(m?"warn":"", m); return true;
 }
-const attName = p => "Attestation_"+(state.type==="mac"||effGrille()==="mac"?"MAC":"Initiale")+"_SST_"+fname(p);
+const attName = p => "Att_"+(effGrille()==="mac"?"SST_MAC":"SST_INI")+"_"+fname(p);
 $("#aAll").onclick = ()=>{ if(!attMsg()) return; const l=attTargets(); if(!l.length){ say("warn","Aucune attestation cochée."); return; }
-  save(buildAttest(l).output("blob"),"Attestations_SST_"+gTag()+(state.fin?"_"+fileSafe(state.fin):"")+".pdf"); };
+  save(buildAttest(l).output("blob"),sessionBase()+"_Attestations.pdf"); };
 $("#aOne").onclick = ()=>{ if(!attMsg()) return; const p=state.participants[state.sel]; if(p) save(buildAttest([p]).output("blob"),attName(p)+".pdf"); };
 $("#aZip").onclick = async ()=>{ if(!attMsg()) return; const l=attTargets(); if(!l.length){ say("warn","Aucune attestation cochée."); return; }
   const z=new JSZip(), used={};
   for (const p of l){ let n=attName(p); used[n]=(used[n]||0)+1; if(used[n]>1) n+="_"+used[n]; z.file(n+".pdf", buildAttest([p]).output("arraybuffer")); }
-  save(await z.generateAsync({type:"blob"}),"Attestations_SST_"+gTag()+(state.fin?"_"+fileSafe(state.fin):"")+".zip"); };
+  save(await z.generateAsync({type:"blob"}),sessionBase()+"_Attestations.zip"); };
 $("#session").oninput = e=>{ state.session=e.target.value.trim(); refresh(true); };
+$("#perimetre").onchange = e=>{ state.perimetre=e.target.value; e.target.classList.toggle("champ-manquant", !state.perimetre); if(state.perimetre) $("#perimErr").innerHTML=""; refresh(true); };
 $("#lieu").oninput = e=>{ state.lieu=e.target.value; e.target.classList.toggle("champ-manquant", !e.target.value); refresh(true); };
 $("#duree").oninput = e=>{ state.duree=e.target.value; state.dureeManual=true; refresh(true); };
-$("#fTitre").onchange = e=>{ state.fTitre=e.target.value; refresh(); };
 
 /* documents scannés à joindre au ZIP (étape 3) : conservés en mémoire seulement, non enregistrés avec la session */
 const SCANS = [
@@ -1999,13 +2028,7 @@ function renderScans(){
 }
 renderScans();
 
-/* nom du ZIP final : « AAAAMMJJ_N°session_Documents_SST_type » (date de début de session, sinon de fin) */
-function zipBaseName(){
-  const m = (state.debut||state.fin||"").match(/(\d{1,2})\D+(\d{1,2})\D+(\d{4})/);
-  const dt = m ? m[3]+m[2].padStart(2,"0")+m[1].padStart(2,"0") : "";
-  const sess = String(state.session||"").replace(/[^A-Za-z0-9\-]+/g,"");
-  return [dt, sess, "Documents_SST", gTag()==="MAC"?"MAC":"Initiale"].filter(Boolean).join("_");
-}
+/* nom du ZIP final : « Date_Périmètre_Thème » (ex. 2026-03-15_SIEGE_SST_INI), identique au JSON de sauvegarde placé à sa racine */
 /* ZIP de tous les documents : 3 dossiers (un PDF par participant) + dossier optionnel des scans */
 $("#zAll").onclick = async ()=>{
   if(!attMsg()) return;
@@ -2014,7 +2037,9 @@ $("#zAll").onclick = async ()=>{
   const btn = $("#zAll"), label = btn.textContent; btn.disabled = true; btn.textContent = "Génération en cours…";
   try{
     await new Promise(r=>setTimeout(r,30));
-    const z = new JSZip(), f1 = z.folder("1_Fiches_evaluation"), f2 = z.folder("2_Grilles_certification"), f3 = z.folder("3_Attestations");
+    const z = new JSZip();
+    z.file(sessionBase()+".json", JSON.stringify(backupSnapshot(), null, 2));
+    const f1 = z.folder("1_Fiches_evaluation"), f2 = z.folder("2_Grilles_certification"), f3 = z.folder("3_Attestations");
     const uniq = {}, name = (p,pre)=>{ let n=pre+fname(p); const k=pre+"|"+n; uniq[k]=(uniq[k]||0)+1; return uniq[k]>1 ? n+"_"+uniq[k] : n; };
     for (const p of all){
       f1.file(name(p,"Fiche_evaluation_SST_")+".pdf", buildDoc([p]).output("arraybuffer"));
@@ -2033,8 +2058,8 @@ $("#zAll").onclick = async ()=>{
         }
       }
     }
-    save(await z.generateAsync({type:"blob",compression:"DEFLATE"}),zipBaseName()+".zip");
-    say("ok","ZIP généré : "+all.length+" fiche(s), "+all.length+" grille(s), "+att.length+" attestation(s)"+(nS?", "+nS+" document(s) scanné(s).":"."));
+    save(await z.generateAsync({type:"blob",compression:"DEFLATE"}),sessionBase()+".zip");
+    say("ok","ZIP généré : sauvegarde .json, "+all.length+" fiche(s), "+all.length+" grille(s), "+att.length+" attestation(s)"+(nS?", "+nS+" document(s) scanné(s).":"."));
   }catch(e){ say("err","Génération impossible : "+esc(e.message||String(e))+"."); }
   btn.textContent = label; btn.disabled = false;
 };
@@ -2052,27 +2077,43 @@ $("#allAcq").onclick = ()=>setAll("A",false); $("#allAcqAll").onclick = ()=>setA
 document.querySelectorAll("#stepnav button").forEach(b=>b.onclick=()=>setStep(+b.dataset.s));
 /* le bandeau étant figé, l'aperçu se cale juste dessous */
 (()=>{ const t=$("#topbar"); const set=()=>document.documentElement.style.setProperty("--topbar-h",t.offsetHeight+"px"); set(); if (window.ResizeObserver) new ResizeObserver(set).observe(t); addEventListener("resize",set); })();
-$("#gAll").onclick = ()=>{ if(!grilleMsg()) return; save(buildGrilles(state.participants).output("blob"),"Grilles_certification_SST_"+gTag()+(state.fin?"_"+fileSafe(state.fin):"")+".pdf"); };
+$("#gAll").onclick = ()=>{ if(!grilleMsg()) return; save(buildGrilles(state.participants).output("blob"),sessionBase()+"_Grilles_certification.pdf"); };
 $("#gOne").onclick = ()=>{ if(!grilleMsg()) return; const p=state.participants[state.sel]; save(buildGrilles([p]).output("blob"),"Grille_certification_SST_"+fname(p)+".pdf"); };
 $("#gZip").onclick = async ()=>{
   if(!grilleMsg()) return; const z=new JSZip(), used={};
   for (const p of state.participants){ let n=fname(p); used[n]=(used[n]||0)+1; if(used[n]>1) n+="_"+used[n]; z.file("Grille_certification_"+n+".pdf", buildGrilles([p]).output("arraybuffer")); }
-  save(await z.generateAsync({type:"blob"}),"Grilles_certification_SST_"+gTag()+(state.fin?"_"+fileSafe(state.fin):"")+".zip");
+  save(await z.generateAsync({type:"blob"}),sessionBase()+"_Grilles_certification.zip");
 };
 $("#formateur").addEventListener("input",()=>{ if(!state.fManual) syncFormateur(); });
 
 /* ---- sauvegarde / réouverture de session ---- */
-const SAVE_KEYS = ["formation","dates","debut","fin","formateur","type","grille","certDate","certManual","fNom","fPrenom","fManual","step","sel","lieu","session","fTitre","duree","dureeManual"];
+const SAVE_KEYS = ["formation","dates","debut","fin","formateur","type","grille","certDate","certManual","fNom","fPrenom","fManual","step","sel","lieu","session","perimetre","duree","dureeManual"];
 function snapshot(){
   const s = {}; for (const k of SAVE_KEYS) s[k]=state[k];
-  s.participants = state.participants; s.sig = state.sig;
-  return { app:"sst-documents", v:1, savedAt:new Date().toISOString(), state:s };
+  s.participants = state.participants.map(p=>{ const {titre, ...r} = p; return r; });   /* plus de civilité */
+  s.sig = state.sig;
+  return { app:"sst-documents", v:2, savedAt:new Date().toISOString(), state:s };
+}
+/* sauvegarde complète (bouton « Enregistrer » et JSON du ZIP) : résumé lisible + données de restauration */
+function backupSnapshot(){
+  const g = effGrille();
+  return Object.assign(snapshot(), {
+    identification_perimetre_formation: state.perimetre,
+    theme: themeSST(),
+    type_formation: g==="mac" ? "MAC – Maintien et actualisation des compétences" : (g==="initiale" ? "Formation initiale" : ""),
+    formation: state.formation,
+    date_session: dateSessionISO(), date_debut: state.debut, date_fin: state.fin,
+    nombre_stagiaires: state.participants.length,
+    /* les documents scannés sont rangés dans le ZIP (dossier 4_Documents_scannes) : seul leur inventaire est noté ici */
+    documents_scannes: SCANS.flatMap(sc=>scans[sc.k].map(f=>({dossier:"4_Documents_scannes/"+sc.dir, nom:f.name, taille:f.size, type:f.type})))
+  });
 }
 function applySnapshot(o){
   if (!o || o.app!=="sst-documents" || !o.state) throw new Error("ce fichier n’est pas une session de cet outil");
   const s = o.state;
   for (const k of SAVE_KEYS) if (s[k]!==undefined) state[k]=s[k];
-  state.participants = (Array.isArray(s.participants)?s.participants:[]).map(p=>({nom:"",prenom:"",...p}));
+  state.participants = (Array.isArray(s.participants)?s.participants:[]).map(p=>{ const q = {nom:"",prenom:"",...p}; delete q.titre; return q; });
+  if (!PERIMETRES.includes(state.perimetre)) state.perimetre = "";
   state.sig = s.sig||null;
   state.sel = Math.max(0,Math.min(state.sel|0, state.participants.length-1));
   if (![1,2,3].includes(state.step)) state.step = 1;
@@ -2089,9 +2130,8 @@ function scheduleAutosave(){
   }catch(e){} },600);
 }
 $("#sSave").onclick = ()=>{
-  const snap = snapshot();
-  const base = fileSafe(state.dates||state.fin||new Date().toISOString().slice(0,10)) || "session";
-  save(new Blob([JSON.stringify(snap)],{type:"application/json"}),"Session_SST_"+base+".json");
+  if(!reqPerimetre()) return;
+  save(new Blob([JSON.stringify(backupSnapshot(), null, 2)],{type:"application/json"}),sessionBase()+".json");
   say("ok","Session enregistrée ("+state.participants.length+" participant(s)). Rouvrez le fichier avec « Ouvrir une session ».");
 };
 $("#sOpen").onclick = ()=>$("#sFile").click();

@@ -314,7 +314,7 @@ label.f:has(.vide){color:var(--bad)}
   <div class="brand">
     <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty"></a>
     <div>
-      <h1>Attestations de formation <span id="appVersion" class="appver">v6.5</span></h1>
+      <h1>Attestations de formation <span id="appVersion" class="appver">v6.6</span></h1>
       <p>Habilitation électrique &amp; Règles de sécurité gaz</p>
     </div>
   </div>
@@ -423,7 +423,7 @@ label.f:has(.vide){color:var(--bad)}
     <button id="btnPdfAll" class="primary">Télécharger un PDF par participant</button>
     <button id="btnPdfMerge" class="ghost">Un seul PDF (toutes les attestations)</button>
     <button id="btnPrintAll" class="ghost">Imprimer</button>
-    <span class="hint" style="margin:0">Nom de fichier&nbsp;: <code>prenom_nom.pdf</code>. Le titre d'habilitation s'édite en Word dans l'onglet&nbsp;5.</span>
+    <span class="hint" style="margin:0">Nom de fichier&nbsp;: <code>Att_HE_Prenom.Nom.pdf</code> (<code>Att_GAZ_…</code> pour le gaz). Le titre d'habilitation s'édite dans l'onglet&nbsp;5.</span>
   </div>
   <div class="stage"><div class="doclist" id="atHost"></div></div>
 </section>
@@ -440,7 +440,7 @@ label.f:has(.vide){color:var(--bad)}
     <button id="btnPdfTitres" class="ghost">Télécharger un Word par participant</button>
     <button id="btnPdfTitresMerge" class="ghost">Un seul Word (tous les titres)</button>
     <button id="btnPrintTitres" class="ghost">Imprimer l'aperçu</button>
-    <span class="hint" style="margin:0">Un titre est édité pour chaque avis favorable. Nom de fichier&nbsp;: <code>titre_prenom_nom.docx</code></span>
+    <span class="hint" style="margin:0">Un titre est édité pour chaque avis favorable. Nom de fichier&nbsp;: <code>Titre_HE_Prenom.Nom.pdf</code> (ou <code>.docx</code> en Word)</span>
   </div>
   <div class="stage"><div class="doclist" id="ttHost"></div></div>
 </section>
@@ -3500,15 +3500,11 @@ const KEY = "fd-attestations-v2";
 const HAB = ["BS","BS BC B2","BS B0 H0 BE Manœuvre","BR B1V H0","BR B1V H0 BC B2"];
 const FILIALES = ["SAV","DGO","DGE","DIF","DARTY","FNAC"];
 const FONCTIONS = ["Technicien","Livreur","Encadrant technique","Encadrant livraison","Encadrant magasin"];
-/* fonction accordée selon la civilité (M. → Technicien, Mme → Technicienne) */
+/* formes féminines de la fonction, proposées dans la liste de choix (plus de civilité : saisie libre) */
 const FONC_FEM = [["Technicien","Technicienne"],["Livreur","Livreuse"],["Encadrant","Encadrante"]];
-function fonctionCiv(f, civ){
-  f = String(f||"").trim(); if(!f) return f;
-  const fem = civ==="Mme";
-  for(const [m,w] of FONC_FEM){
-    const a = fem ? m : w, b = fem ? w : m;
-    if(f===a || f.indexOf(a+" ")===0) return b + f.slice(a.length);
-  }
+function fonctionFem(f){
+  f = String(f||"").trim();
+  for(const [m,w] of FONC_FEM){ if(f===m || f.indexOf(m+" ")===0) return w + f.slice(m.length); }
   return f;
 }
 /* filiale → raison sociale portée sur le titre d'habilitation */
@@ -3544,6 +3540,7 @@ function blankSig(){
 function blankSession(){
   return {
     type:"elec", habilitation:"BS", techAc:false,
+    perimetre:"",                               /* Identification périmètre de formation (obligatoire) */
     intitule:"", intituleAuto:true, intituleFE:"",
     dateDebut:"", dateFin:"", lieu:"", duree:"7", dureePratique:"2", numero:"",
     formateur:"", siteIntervenant:"IVRY / SEINE", organisme:"Académie FNAC DARTY",
@@ -3638,7 +3635,7 @@ function titreData(s, r){
 function eligibleTitre(r){ return S.session.type==="elec" && avisOk(r.avis); }
 function rowsTitre(){ return S.rows.filter(eligibleTitre); }
 function blankRow(){
-  return {civ:"M.",nom:"",prenom:"",matricule:"",fonction:"Technicien",filiale:"",site:"",etab:"",
+  return {nom:"",prenom:"",matricule:"",fonction:"Technicien",filiale:"",site:"",etab:"",
           typeForm:"", elearn:"OUI", pratique:"OUI", note:"", avis:"F"};
 }
 /* « Initial » (versions précédentes) devient « Initiale » */
@@ -3657,6 +3654,7 @@ function normalize(d){
   if(old.titreInfos != null && !old.titreAutorisations)
     sess.titreAutorisations = old.titreInfos;
   if(!Array.isArray(sess.titreLignes) || sess.titreLignes.length!==4) sess.titreLignes = null;
+  if(PERIMETRES.indexOf(sess.perimetre)<0) sess.perimetre = "";
   if(!old.titreSignataire){   /* session enregistrée avant les signataires */
     const m = SIGNATAIRES.find(x=>x.nom===sess.titreEmpNom);
     sess.titreSignataire = m ? m.id : (CLEAN(sess.titreEmpNom) ? "autre" : "");
@@ -3666,6 +3664,7 @@ function normalize(d){
     session: sess,
     rows: (d.rows||[]).map(r=>{
       const o = Object.assign(blankRow(), r);
+      delete o.civ;                                  /* la civilité n'existe plus */
       o.typeForm = normType(o.typeForm);
       o.matricule = matriculeOK(o.matricule);
       return o;
@@ -3690,7 +3689,64 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&
 function fdate(iso){ if(!iso) return "……/……/………"; const p=iso.split("-"); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:iso; }
 function plusYears(iso,n){ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; d.setFullYear(d.getFullYear()+n); return fdate(d.toISOString().slice(0,10)); }
 function slug(s){ return String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"").toLowerCase(); }
-function fullName(r){ return [r.civ, (r.nom||"").toUpperCase(), r.prenom].filter(Boolean).join(" ").trim(); }
+function fullName(r){ return [(r.nom||"").toUpperCase(), r.prenom].filter(Boolean).join(" ").trim(); }
+
+/* ---------------- périmètre de formation & nommage des fichiers ----------------
+   Fichiers de session : Date_Périmètre_Thème   (ex. 2026-03-15_EXP-FNAC_HE)
+   Fichiers individuels : Att_HE_Prenom.Nom.pdf · Att_GAZ_Prenom.Nom.pdf · Titre_HE_Prenom.Nom.pdf */
+const PERIMETRES = ["EXP-FNAC","EXP-DGO","EXP-DIF","EXP-DGE","OPE-DGO","OPE-DIF","OPE-DGE","OPE-FNAC","SIEGE"];
+function themeCode(){ return S.session.type==="gaz" ? "GAZ" : "HE"; }
+function dateSessionISO(){ return String(S.session.dateDebut || S.session.dateFin || todayISO()).slice(0,10); }
+function sessionBase(){ return dateSessionISO() + "_" + S.session.perimetre + "_" + themeCode(); }
+/* nom de fichier sûr : sans accent, sans espace ni caractère interdit — « Prenom.Nom » */
+const TRANSLIT = {"œ":"oe","Œ":"Oe","æ":"ae","Æ":"Ae","ß":"ss","ø":"o","Ø":"O","đ":"d","Đ":"D","ł":"l","Ł":"L","ı":"i","þ":"th","Þ":"Th"};
+function partFichier(v){
+  const t = String(v||"").replace(/[œŒæÆßøØđĐłŁıþÞ]/g, c=>TRANSLIT[c]).normalize("NFD").replace(/[̀-ͯ]/g,"");
+  return t.split(/[^A-Za-z0-9]+/).filter(Boolean)
+          .map(w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join("-");
+}
+function personneFichier(r){
+  return [partFichier(r.prenom), partFichier(r.nom)].filter(Boolean).join(".") || "participant";
+}
+const nomAtt   = r => "Att_" + themeCode() + "_" + personneFichier(r) + ".pdf";
+const nomTitre = (r, ext) => "Titre_HE_" + personneFichier(r) + "." + (ext||"pdf");
+/* contrôle bloquant : aucun fichier n'est généré sans périmètre */
+function requirePerimetre(){
+  if(PERIMETRES.indexOf(S.session.perimetre)>=0) return true;
+  setTab("saisie");
+  const el = $("#s-perimetre");
+  if(el){ el.classList.add("vide"); try{ el.scrollIntoView({block:"center"}); el.focus(); }catch(e){} }
+  alert("Renseignez d'abord « Identification périmètre de formation » (onglet 1, Informations de session) : ce champ est obligatoire, il sert à nommer tous les fichiers générés.");
+  return false;
+}
+/* ---------------- sauvegarde complète de la session (.json) ---------------- */
+function bkToB64(u8){ let s="", ch=0x8000; for(let i=0;i<u8.length;i+=ch) s += String.fromCharCode.apply(null, u8.subarray(i,i+ch)); return btoa(s); }
+function bkFromB64(b){ const s=atob(b), u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u; }
+function sessionBackup(){
+  const s = S.session;
+  return {
+    format:"fd-attestations-session", version:3,
+    genere_le:new Date().toISOString(),
+    application:"Attestations de formation " + (($("#appVersion")||{}).textContent||""),
+    identification_perimetre_formation:s.perimetre,
+    theme:themeCode(),
+    type_formation:stageTitle(),
+    type_formation_par_defaut:s.type==="gaz" ? "" : s.defautType,
+    date_session:s.dateDebut, date_fin_session:s.dateFin,
+    nombre_stagiaires:S.rows.length,
+    /* données de restauration : lues telles quelles par « Ouvrir (.json) » */
+    session:s, rows:S.rows, sig:S.sig,
+    pieces_jointes:{
+      emargement:ATT.emarg.map(f=>({nom:f.name, base64:bkToB64(f.bytes)})),
+      resultats_qcm:ATT.qcm.map(f=>({nom:f.name, base64:bkToB64(f.bytes)}))
+    }
+  };
+}
+function restoreAttachments(d){
+  const pj = (d && d.pieces_jointes) || {};
+  const lire = a => (Array.isArray(a)?a:[]).map(f=>{ try{ return {name:f.nom, bytes:bkFromB64(f.base64)}; }catch(e){ return null; } }).filter(Boolean);
+  ATT = {emarg:lire(pj.emargement), qcm:lire(pj.resultats_qcm)};
+}
 function autoTitle(s){ return s.type==="gaz" ? "Sécurité GAZ" : "Habilitation électrique "+s.habilitation; }
 function stageTitle(){ const s = S.session; return (s.intituleAuto===false && s.intitule) ? s.intitule : autoTitle(s); }
 const AVIS = {F:"Avis favorable", D:"Avis défavorable", A:"Absent", R:"Avis favorable sous réserves"};
@@ -3884,7 +3940,7 @@ function padEnd(){ PAD.last = null; }
 /* ---------------- formulaire de session ---------------- */
 function fieldsDef(){
   const g = S.session.type==="gaz";
-  const f = [];
+  const f = [{k:"perimetre",l:"Identification périmètre de formation",t:"select",o:[""].concat(PERIMETRES)}];
   if(!g) f.push({k:"habilitation",l:"Titre d'habilitation",t:"select",o:habOptions(S.session.habilitation)});
   f.push(
     {k:"intitule",l:"Intitulé du stage",t:"text",ph:autoTitle(S.session)},
@@ -3911,7 +3967,7 @@ function renderSession(){
   host.innerHTML = fieldsDef().map(f=>{
     const v = esc(f.k==="intitule" && S.session.intituleAuto!==false ? autoTitle(S.session) : S.session[f.k]);
     const ctl = f.t==="select"
-      ? `<select data-s="${f.k}" id="s-${f.k}">${f.o.map(o=>`<option${o===S.session[f.k]?" selected":""}>${esc(o)}</option>`).join("")}</select>`
+      ? `<select data-s="${f.k}" id="s-${f.k}">${f.o.map(o=>`<option value="${esc(o)}"${o===S.session[f.k]?" selected":""}>${esc(o||"— Choisir —")}</option>`).join("")}</select>`
       : `<input type="${f.t}" data-s="${f.k}" id="s-${f.k}" value="${v}"${f.ph?` placeholder="${esc(f.ph)}"`:""}>`;
     return `<label class="f">${esc(f.l)}${ctl}</label>`;
   }).join("")
@@ -3925,7 +3981,6 @@ function renderSession(){
 function cols(){
   const g = S.session.type==="gaz";
   const c = [
-    {k:"civ",l:"Civ.",t:"select",o:["M.","Mme"],w:"62px"},
     {k:"nom",l:"Nom",t:"text",w:"130px"},
     {k:"prenom",l:"Prénom",t:"text",w:"126px"},
     {k:"matricule",l:"Matricule",t:"text",w:"94px"},
@@ -4285,7 +4340,8 @@ function renderTitreDocs(){
         <strong style="font-family:var(--font-ui)">${esc(fullName(r))||"(sans nom)"}</strong>
         <span class="pill ${r.avis==="R"?"r":"f"}">${esc(AVIS[r.avis]||"")}</span>
         <div style="flex:1"></div>
-        <button class="tiny primary" data-titre="${i}">PDF</button>
+        <button class="tiny primary" data-titrepdf="${i}">PDF</button>
+        <button class="tiny ghost" data-titre="${i}">Word</button>
       </div>
       ${titreHTML(r)}
     </div>`;
@@ -4326,25 +4382,32 @@ function doPrint(html, orientation, filename){
 }
 
 /* ---------------- exports PDF ---------------- */
-const fileBase = () => slug(S.session.numero) || "sans_numero";
 function exportSynthese(){
+  if(!requirePerimetre()) return;
   try{
     const d = pdfSynthese(S, assets());
-    d.save("synthese_session_" + fileBase() + ".pdf");
+    d.save(sessionBase() + "_Synthese.pdf");
   }catch(e){ alert("Génération du PDF impossible : " + (e && e.message ? e.message : e)); }
 }
 function exportAttestation(i){
   const r = S.rows[i];
-  if(!r) return;
+  if(!r || !requirePerimetre()) return;
   const d = pdfAttestation(S, r, assets());
-  d.save((slug(r.prenom)+"_"+slug(r.nom)).replace(/^_|_$/g,"") + ".pdf");
+  d.save(nomAtt(r));
 }
 function exportTitre(i){
   const r = S.rows[i];
-  if(!r) return;
-  saveBlob(docxTitres(S, [r]), "titre_" + (slug(r.prenom)+"_"+slug(r.nom)).replace(/^_|_$/g,"") + ".docx");
+  if(!r || !requirePerimetre()) return;
+  saveBlob(docxTitres(S, [r]), nomTitre(r, "docx"));
+}
+function exportTitrePdf(i){
+  const r = S.rows[i];
+  if(!r || !requirePerimetre()) return;
+  try{ pdfTitre(S, r, assets()).save(nomTitre(r, "pdf")); }
+  catch(e){ alert("Génération du PDF impossible : " + (e && e.message ? e.message : e)); }
 }
 async function exportAllTitres(){
+  if(!requirePerimetre()) return;
   const rows = rowsTitre();
   if(!rows.length){ alert("Aucun participant avec un avis favorable."); return; }
   for(const r of rows){
@@ -4354,12 +4417,14 @@ async function exportAllTitres(){
   toast(rows.length + " titre" + (rows.length>1?"s":"") + " Word téléchargé" + (rows.length>1?"s":""));
 }
 function exportMergedTitres(){
+  if(!requirePerimetre()) return;
   const rows = rowsTitre();
   if(!rows.length){ alert("Aucun participant avec un avis favorable."); return; }
-  saveBlob(docxTitres(S, rows), "titres_habilitation_session_" + fileBase() + ".docx");
+  saveBlob(docxTitres(S, rows), sessionBase() + "_Titres.docx");
 }
 async function exportAllAttestations(){
   if(!S.rows.length){ alert("Aucun participant."); return; }
+  if(!requirePerimetre()) return;
   for(let i=0;i<S.rows.length;i++){
     exportAttestation(i);
     await new Promise(r=>setTimeout(r, 350));
@@ -4495,48 +4560,46 @@ function pdfTitres(S, rows, A){
 }
 
 /* ---------------- dernière étape : archive .zip de tous les PDF ----------------
-   Tableau de synthèse + attestations (+ titres d'habilitation en électrique),
-   tous en PDF, rangés par dossier. Nom : « n° de session _ date de session ». */
+   Sauvegarde .json (racine) + tableau de synthèse + attestations (+ titres d'habilitation
+   en électrique), tous en PDF, rangés par dossier. Nom : « Date_Périmètre_Thème ». */
 function pdfBytes(d){ return new Uint8Array(d.output("arraybuffer")); }
-function zipBaseName(){
-  const s = S.session;
-  const num = slug(s.numero) || "sans_numero";
-  const dt = String(s.dateDebut || s.dateFin || todayISO()).slice(0,10);
-  return num + "_" + dt;
-}
 function exportZip(){
   if(!S.rows.length){ alert("Aucun participant."); return; }
-  const g = S.session.type==="gaz", A = assets(), files = [], used = {};
+  if(!requirePerimetre()) return;
+  const g = S.session.type==="gaz", A = assets(), files = [], used = {}, base0 = sessionBase();
   const uniq = (dir, base)=>{
     let n = base, k = 2;
     while(used[dir+n]) n = base + "_" + (k++);
     used[dir+n] = 1; return n;
   };
   try{
-    files.push({name:"Tableau_synthese/synthese_session_" + fileBase() + ".pdf", data:pdfBytes(pdfSynthese(S, A))});
+    /* sauvegarde JSON à la racine : toutes les données pour restaurer la session */
+    files.push({name:base0 + ".json", data:JSON.stringify(sessionBackup(), null, 2)});
+    files.push({name:"Tableau_synthese/" + base0 + "_Synthese.pdf", data:pdfBytes(pdfSynthese(S, A))});
     S.rows.forEach(r=>{
-      const base = uniq("A/", (slug(r.prenom)+"_"+slug(r.nom)).replace(/^_|_$/g,"") || "participant");
+      const base = uniq("A/", nomAtt(r).replace(/\.pdf$/, ""));
       files.push({name:"Attestations/" + base + ".pdf", data:pdfBytes(pdfAttestation(S, r, A))});
     });
     let nt = 0;
     if(!g){
       rowsTitre().forEach(r=>{
-        const base = uniq("T/", "titre_" + ((slug(r.prenom)+"_"+slug(r.nom)).replace(/^_|_$/g,"") || "participant"));
+        const base = uniq("T/", nomTitre(r).replace(/\.pdf$/, ""));
         files.push({name:"Titres_habilitation/" + base + ".pdf", data:pdfBytes(pdfTitre(S, r, A))});
         nt++;
       });
     }
     ATT.emarg.forEach(f=> files.push({name:"Feuille_emargement/" + uniq("E/", f.name), data:f.bytes}));
     ATT.qcm.forEach(f=> files.push({name:"Resultats_QCM/" + uniq("Q/", f.name), data:f.bytes}));
-    saveBlob(zipStore(files, "application/zip"), zipBaseName() + ".zip");
-    toast("Archive « " + zipBaseName() + ".zip » : 1 synthèse, " + S.rows.length + " attestation" + (S.rows.length>1?"s":"") + (g ? "" : ", " + nt + " titre" + (nt>1?"s":"")) + (ATT.emarg.length ? ", la feuille d'émargement" : "") + (ATT.qcm.length ? ", la capture QCM" : ""));
+    saveBlob(zipStore(files, "application/zip"), base0 + ".zip");
+    toast("Archive « " + base0 + ".zip » : sauvegarde .json, 1 synthèse, " + S.rows.length + " attestation" + (S.rows.length>1?"s":"") + (g ? "" : ", " + nt + " titre" + (nt>1?"s":"")) + (ATT.emarg.length ? ", la feuille d'émargement" : "") + (ATT.qcm.length ? ", la capture QCM" : ""));
   }catch(e){ alert("Génération de l'archive impossible : " + (e && e.message ? e.message : e)); }
 }
 
 function exportMerged(){
   if(!S.rows.length){ alert("Aucun participant."); return; }
+  if(!requirePerimetre()) return;
   const d = pdfAttestations(S, S.rows, assets());
-  d.save("attestations_session_" + fileBase() + ".pdf");
+  d.save(sessionBase() + "_Attestations.pdf");
 }
 
 /* ---------------- assistant : nouvelle session ---------------- */
@@ -4604,6 +4667,7 @@ function renderWizard(){
         : `<div class="msg ok">${p.res.rows.length} participant${p.res.rows.length>1?"s":""}, l'en-tête de session et le formateur ont été lus sur la feuille.</div>`}
       <p class="hint" style="margin:6px 0 0">Modèle de feuille reconnu&nbsp;: <strong>${esc(p.res.formatLabel || ("version "+p.res.version))}</strong> — ${p.res.rows.length} participant${p.res.rows.length>1?"s":""} lu${p.res.rows.length>1?"s":""}.</p>
       <div class="rev" style="margin-top:16px">
+        <label class="f">Identification périmètre de formation<select id="wPerimetre"${p.form.perimetre?"":' class="vide"'}><option value=""${p.form.perimetre?"":" selected"}>— Choisir —</option>${PERIMETRES.map(o=>`<option${o===p.form.perimetre?" selected":""}>${o}</option>`).join("")}</select></label>
         <label class="f">Type de formation<select id="wType">
           <option value="elec"${g?"":" selected"}>Habilitation électrique</option>
           <option value="gaz"${g?" selected":""}>Règles de sécurité gaz</option></select></label>
@@ -4692,6 +4756,7 @@ document.addEventListener("input", e=>{
 function syncWizForm(){
   if(!WZ.parsed || WZ.step!=="review" || !$("#wType")) return;
   Object.assign(WZ.parsed.form, {
+    perimetre: $("#wPerimetre") ? $("#wPerimetre").value : (WZ.parsed.form.perimetre || ""),
     type:$("#wType").value,
     habilitation: $("#wHab") ? $("#wHab").value : WZ.parsed.form.habilitation,
     intitule:$("#wIntitule").value,
@@ -4711,6 +4776,7 @@ function wizardApply(replace){
   const p = WZ.parsed;
   const intitule = (p.form.intitule||"").trim();
   const header = {
+    perimetre: PERIMETRES.indexOf(p.form.perimetre)>=0 ? p.form.perimetre : "",
     type:p.form.type, habilitation:p.form.habilitation,
     intituleFE:intitule,
     intitule: guessType(intitule) ? "" : intitule,
@@ -4722,7 +4788,7 @@ function wizardApply(replace){
     defautType: normType(p.form.defautType) || "Recyclage"
   };
   if(replace){ ATT = {emarg:[], qcm:[]}; S = {session:Object.assign(blankSession(), header), rows:p.rows.map(r=>Object.assign({},r)), sig:blankSig()}; }
-  else { S.rows = S.rows.concat(p.rows.map(r=>Object.assign({},r))); if(!S.session.formateur) S.session.formateur = header.formateur; }
+  else { S.rows = S.rows.concat(p.rows.map(r=>Object.assign({},r))); if(!S.session.formateur) S.session.formateur = header.formateur; if(!S.session.perimetre) S.session.perimetre = header.perimetre; }
   if(p.file) ATT.emarg.push(p.file);
   closeWizard();
   refresh();
@@ -4731,12 +4797,8 @@ function wizardApply(replace){
 
 /* ---------------- sauvegarde de session ---------------- */
 function saveJson(){
-  const name = "session_"+fileBase()+".json";
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:"application/json"}));
-  a.download = name;
-  a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  if(!requirePerimetre()) return;
+  saveBlob(new Blob([JSON.stringify(sessionBackup(), null, 2)], {type:"application/json"}), sessionBase() + ".json");
 }
 
 /* ---------------- onglets ---------------- */
@@ -4771,6 +4833,7 @@ document.addEventListener("click", e=>{
   if(act==="swap"){ const r=S.rows[+t.dataset.i]; const n=r.nom; r.nom=r.prenom; r.prenom=n; refresh(); return; }
   if(t.dataset.pdf!=null){ exportAttestation(+t.dataset.pdf); return; }
   if(t.dataset.titre!=null){ exportTitre(+t.dataset.titre); return; }
+  if(t.dataset.titrepdf!=null){ exportTitrePdf(+t.dataset.titrepdf); return; }
   if(t.dataset.sig){
     const k = t.dataset.sig;
     if(k==="style"){ S.sig.formateur.mode="auto"; S.sig.formateur.style = +t.dataset.style; }
@@ -4796,9 +4859,9 @@ document.addEventListener("click", e=>{
     case "btnFonctionAll": {
       if(!S.rows.length){ alert("Aucun participant."); break; }
       const v = $("#selFonctionAll").value;
-      S.rows.forEach(r=>{ r.fonction = fonctionCiv(v, r.civ); });
+      S.rows.forEach(r=>{ r.fonction = v; });
       refresh();
-      toast("Fonction appliquée à "+S.rows.length+" participant"+(S.rows.length>1?"s":"")+" (accordée selon M. / Mme) — modifiable ligne par ligne");
+      toast("Fonction appliquée à "+S.rows.length+" participant"+(S.rows.length>1?"s":"")+" — modifiable ligne par ligne");
       break;
     }
     case "btnFilSite": {
@@ -4841,17 +4904,17 @@ document.addEventListener("click", e=>{
     case "btnLoad": $("#fileJson").click(); break;
     case "btnImp": doImport(); break;
     case "btnPdfSy": exportSynthese(); break;
-    case "btnPrintSy": doPrint(renderSynthese(),"landscape","synthese_session_"+fileBase()); break;
+    case "btnPrintSy": if(requirePerimetre()) doPrint(renderSynthese(),"landscape",sessionBase()+"_Synthese"); break;
     case "btnPdfAll": exportAllAttestations(); break;
     case "btnPdfMerge": exportMerged(); break;
-    case "btnPrintAll": doPrint(S.rows.map(attest).join(""),"portrait","attestations_session_"+fileBase()); break;
+    case "btnPrintAll": if(requirePerimetre()) doPrint(S.rows.map(attest).join(""),"portrait",sessionBase()+"_Attestations"); break;
     case "btnZip": case "btnZipGaz": exportZip(); break;
     case "btnPdfTitres": exportAllTitres(); break;
     case "btnPdfTitresMerge": exportMergedTitres(); break;
     case "btnPrintTitres": {
       const rows = rowsTitre();
       if(!rows.length){ alert("Aucun participant avec un avis favorable."); break; }
-      doPrint(rows.map(titreHTML).join(""),"portrait","titres_session_"+fileBase());
+      if(requirePerimetre()) doPrint(rows.map(titreHTML).join(""),"portrait",sessionBase()+"_Titres");
       break;
     }
     case "padClear": { const c=$("#pad"); c.getContext("2d").clearRect(0,0,c.width,c.height); break; }
@@ -4936,12 +4999,8 @@ document.addEventListener("input", e=>{
 });
 document.addEventListener("change", e=>{
   const el = e.target;
+  if(el.id==="wPerimetre"){ el.classList.toggle("vide", !el.value); syncWizForm(); return; }
   if(el.id==="wType"){ syncWizForm(); renderWizard(); return; }
-  if(el.dataset.k==="civ" && el.dataset.i!=null){
-    const r = S.rows[+el.dataset.i];
-    if(r){ r.civ = el.value; r.fonction = fonctionCiv(r.fonction, r.civ); save(); renderTable(); renderTitreDocs(); }
-    return;
-  }
   if(el.id==="filePdf" && el.files && el.files[0]){ handlePdf(el.files[0]); el.value=""; return; }
   if(el.id==="fileSig" && el.files && el.files[0]){
     const which = PAD.target==="academie" ? "academie" : "formateur";
@@ -4964,7 +5023,7 @@ document.addEventListener("change", e=>{
   if(el.id==="fileJson" && el.files && el.files[0]){
     const fr = new FileReader();
     fr.onload = () => { try{ const d=JSON.parse(fr.result);
-        if(d && d.session && Array.isArray(d.rows)){ ATT = {emarg:[], qcm:[]}; S = normalize(d); closeWizard(); refresh(); setTab("saisie"); }
+        if(d && d.session && Array.isArray(d.rows)){ restoreAttachments(d); S = normalize(d); closeWizard(); refresh(); setTab("saisie"); }
         else alert("Ce fichier ne contient pas de session valide.");
       }catch(err){ alert("Fichier illisible : "+err.message); } };
     fr.readAsText(el.files[0]);
@@ -5045,8 +5104,8 @@ document.addEventListener("keydown", e=>{
 /* ---------------- champs obligatoires non renseignés : mise en rouge ---------------- */
 function reqSessionKeys(){
   const g = S.session.type==="gaz";
-  return g ? ["numero","dateDebut","lieu","duree","formateur","siteIntervenant","organisme"]
-           : ["numero","dateDebut","dateFin","lieu","duree","dureePratique","formateur","siteIntervenant","organisme",
+  return g ? ["perimetre","numero","dateDebut","lieu","duree","formateur","siteIntervenant","organisme"]
+           : ["perimetre","numero","dateDebut","dateFin","lieu","duree","dureePratique","formateur","siteIntervenant","organisme",
               "titreDateSig","titreEmpNom","titreEmpFonction","titreTension","titreOuvrages","titreIndications","titreAutorisations"];
 }
 function reqRowKeys(r){
@@ -5103,7 +5162,7 @@ window.__bootApp = function boot(){
   document.body.appendChild(dl);
   const dl2 = document.createElement("datalist");
   dl2.id = "dl-fonction";
-  dl2.innerHTML = FONCTIONS.concat(FONCTIONS.map(f=>fonctionCiv(f,"Mme")).filter(f=>FONCTIONS.indexOf(f)<0)).map(f=>`<option value="${f}">`).join("");
+  dl2.innerHTML = FONCTIONS.concat(FONCTIONS.map(fonctionFem).filter(f=>FONCTIONS.indexOf(f)<0)).map(f=>`<option value="${f}">`).join("");
   $("#selFilAll").innerHTML = FILIALES.map(f=>`<option>${f}</option>`).join("");
   $("#selFonctionAll").innerHTML = FONCTIONS.map(f=>`<option>${f}</option>`).join("");
   document.body.appendChild(dl2);
