@@ -3635,7 +3635,7 @@ function titreData(s, r){
 function eligibleTitre(r){ return S.session.type==="elec" && avisOk(r.avis); }
 function rowsTitre(){ return S.rows.filter(eligibleTitre); }
 function blankRow(){
-  return {nom:"",prenom:"",matricule:"",fonction:"Technicien",filiale:"",site:"",etab:"",
+  return {nom:"",prenom:"",matricule:"",fonction:"",filiale:"",site:"",etab:"",
           typeForm:"", elearn:"OUI", pratique:"OUI", note:"", avis:"F"};
 }
 /* « Initial » (versions précédentes) devient « Initiale » */
