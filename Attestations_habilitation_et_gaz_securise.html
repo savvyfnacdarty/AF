@@ -4296,6 +4296,11 @@ function fieldsDef(){
 function renderSession(){
   const host = $("#sessionFields");
   host.innerHTML = fieldsDef().map(f=>{
+    if(f.k==="habilitation"){
+      const cust = !!S.session.habAutre;
+      const opts = cust ? HAB : f.o;
+      return `<label class="f">${esc(f.l)}<select data-habsel="1" id="s-habsel">${opts.map(o=>`<option value="${esc(o)}"${!cust && o===S.session.habilitation?" selected":""}>${esc(o)}</option>`).join("")}<option value="__autre__"${cust?" selected":""}>Autre… (saisir)</option></select>${cust?`<input type="text" data-s="habilitation" id="s-habilitation" value="${esc(S.session.habilitation)}" placeholder="ex. BR B1V H0 BC B2 HC">`:""}</label>`;
+    }
     const v = esc(f.k==="intitule" && S.session.intituleAuto!==false ? autoTitle(S.session) : S.session[f.k]);
     const ctl = f.t==="select"
       ? `<select data-s="${f.k}" id="s-${f.k}">${f.o.map(o=>`<option value="${esc(o)}"${o===S.session[f.k]?" selected":""}>${esc(o||"— Choisir —")}</option>`).join("")}</select>`
@@ -5002,7 +5007,7 @@ function renderWizard(){
         <label class="f">Type de formation<select id="wType">
           <option value="elec"${g?"":" selected"}>Habilitation électrique</option>
           <option value="gaz"${g?" selected":""}>Règles de sécurité gaz</option></select></label>
-        ${g?"":`<label class="f">Titre d'habilitation<select id="wHab">${habOptions(p.form.habilitation).map(h=>`<option${h===p.form.habilitation?" selected":""}>${esc(h)}</option>`).join("")}</select></label>`}
+        ${g?"":`<label class="f">Titre d'habilitation<select id="wHab">${(p.form.habAutre?HAB:habOptions(p.form.habilitation)).map(h=>`<option${!p.form.habAutre && h===p.form.habilitation?" selected":""}>${esc(h)}</option>`).join("")}<option value="__autre__"${p.form.habAutre?" selected":""}>Autre… (saisir)</option></select>${p.form.habAutre?`<input id="wHabTxt" value="${esc(p.form.habilitation)}" placeholder="ex. BR B1V H0 BC B2 HC">`:""}</label>`}
         ${g?"":`<label class="f">Type de formation (tous les participants)<select id="wTypeForm">${["Initiale","Recyclage"].map(o=>`<option${o===p.form.defautType?" selected":""}>${o}</option>`).join("")}</select></label>`}
         <label class="f${mc('intitulé')}">Intitulé lu sur la feuille<input id="wIntitule" value="${esc(p.form.intitule)}"></label>
         <label class="f${mc('n° de session')}">N° / code de session<input id="wNumero" value="${esc(p.form.numero)}"></label>
@@ -5172,7 +5177,8 @@ function syncWizForm(){
   Object.assign(WZ.parsed.form, {
     perimetre: $("#wPerimetre") ? $("#wPerimetre").value : (WZ.parsed.form.perimetre || ""),
     type:$("#wType").value,
-    habilitation: $("#wHab") ? $("#wHab").value : WZ.parsed.form.habilitation,
+    habilitation: $("#wHab") ? ($("#wHab").value==="__autre__" ? ($("#wHabTxt") ? $("#wHabTxt").value : WZ.parsed.form.habilitation) : $("#wHab").value) : WZ.parsed.form.habilitation,
+    habAutre: $("#wHab") ? $("#wHab").value==="__autre__" : !!WZ.parsed.form.habAutre,
     intitule:$("#wIntitule").value,
     numero:$("#wNumero").value,
     dateDebut:$("#wDate").value,
@@ -5191,7 +5197,7 @@ function wizardApply(replace){
   const intitule = (p.form.intitule||"").trim();
   const header = {
     perimetre: PERIMETRES.indexOf(p.form.perimetre)>=0 ? p.form.perimetre : "",
-    type:p.form.type, habilitation:p.form.habilitation,
+    type:p.form.type, habilitation:p.form.habilitation, habAutre:!!p.form.habAutre,
     intituleFE:intitule,
     intitule: guessType(intitule) ? "" : intitule,
     intituleAuto: !!guessType(intitule),
@@ -5349,6 +5355,14 @@ document.addEventListener("click", e=>{
 /* signataire du titre : liste déroulante + « Autre personne… » */
 document.addEventListener("change", e=>{
   const el = e.target;
+  if(el.dataset && el.dataset.habsel!=null){
+    const se = S.session;
+    if(el.value==="__autre__"){ se.habAutre = true; }
+    else { se.habAutre = false; se.habilitation = el.value; se.titreLignes = null; se.intituleAuto = true; se.intitule = ""; }
+    save(); renderSession(); renderTitres();
+    if(se.habAutre){ const t = $("#s-habilitation"); if(t){ t.focus(); t.select(); } }
+    return;
+  }
   if(el.dataset && el.dataset.sign!=null){
     const se = S.session, p = SIGNATAIRES.find(x=>x.id===el.value);
     se.titreSignataire = p ? p.id : (el.value==="" ? "" : "autre");
@@ -5421,6 +5435,7 @@ document.addEventListener("change", e=>{
   }
   if(el.id==="wPerimetre"){ el.classList.toggle("vide", !el.value); syncWizForm(); return; }
   if(el.id==="wType"){ syncWizForm(); renderWizard(); return; }
+  if(el.id==="wHab"){ syncWizForm(); renderWizard(); const t = $("#wHabTxt"); if(t){ t.focus(); t.select(); } return; }
   if(el.id==="filePdf" && el.files && el.files[0]){ handlePdf(el.files[0]); el.value=""; return; }
   if(el.id==="fileSig" && el.files && el.files[0]){
     const which = PAD.target==="academie" ? "academie" : "formateur";
@@ -5525,7 +5540,7 @@ document.addEventListener("keydown", e=>{
 function reqSessionKeys(){
   const g = S.session.type==="gaz";
   return g ? ["perimetre","numero","dateDebut","lieu","duree","formateur","siteIntervenant","organisme"]
-           : ["perimetre","numero","dateDebut","dateFin","lieu","duree","dureePratique","formateur","siteIntervenant","organisme",
+           : ["perimetre","habilitation","numero","dateDebut","dateFin","lieu","duree","dureePratique","formateur","siteIntervenant","organisme",
               "titreDateSig","titreEmpNom","titreEmpFonction","titreTension","titreOuvrages","titreIndications","titreAutorisations"];
 }
 function reqRowKeys(r){
