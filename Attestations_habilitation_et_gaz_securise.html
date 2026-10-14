@@ -460,7 +460,7 @@ label.f:has(.vide){color:var(--bad)}
     <div class="ft" id="wizFoot"></div>
   </div>
 </div>
-<input type="file" id="filePdf" accept="application/pdf,.pdf" hidden>
+<input type="file" id="filePdf" accept="application/pdf,.pdf,application/json,.json" hidden>
 <!-- ============ IMPORT DES NOTES QCM (capture d'écran) ============ -->
 <div class="overlay" id="qcm" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="qcmTitle">
@@ -4977,9 +4977,9 @@ function renderWizard(){
     $("#wizSub").textContent = "Déposez la feuille d'émargement : elle fournit l'intitulé, la date, le lieu, la durée, le n° de session, le formateur et la liste des participants.";
     body.innerHTML = `
       <div class="drop" id="dropzone">
-        <h3>${WZ.busy ? "Lecture du PDF…" : "Déposez le PDF d'émargement ici"}</h3>
+        <h3>${WZ.busy ? "Lecture du PDF…" : "Déposez le PDF d'émargement ici (ou une sauvegarde .json)"}</h3>
         <p id="wizStatus">${WZ.busy ? esc(WZ.status || "Extraction de l'en-tête et des participants.") : "ou choisissez le fichier sur votre poste"}</p>
-        <button class="primary" id="pickPdf"${WZ.busy?" disabled":""}>Choisir un fichier PDF</button>
+        <button class="primary" id="pickPdf"${WZ.busy?" disabled":""}>Choisir un fichier PDF ou .json</button>
       </div>
       ${WZ.error ? `<div class="msg err">${esc(WZ.error)}</div>` : ""}
       <p class="hint">Le PDF d'origine (avant impression et signature) est lu directement. Une feuille <strong>scannée</strong> (image, sans texte) est lue par reconnaissance de caractères pour le modèle Adecco Training : vérifiez alors les noms et les absents à l'étape suivante (connexion Internet requise la première fois). Les feuilles protégées en écriture sont acceptées.</p>
@@ -5110,8 +5110,18 @@ async function v5ScanPdf(bytes){
   return v5Build(pages, [], "ocr");
 }
 
+/* ouverture d'une sauvegarde .json (même traitement que « Ouvrir (.json) ») */
+function restoreJsonFile(file){
+  const fr = new FileReader();
+  fr.onload = () => { try{ const d = JSON.parse(fr.result);
+      if(d && d.session && Array.isArray(d.rows)){ restoreAttachments(d); S = normalize(d); closeWizard(); refresh(); setTab("saisie"); }
+      else { WZ.error = "Ce fichier .json ne contient pas de session valide."; renderWizard(); }
+    }catch(err){ WZ.error = "Fichier .json illisible : "+err.message; renderWizard(); } };
+  fr.readAsText(file);
+}
 async function handlePdf(file){
   if(!file) return;
+  if(/\.json$/i.test(file.name) || file.type==="application/json"){ WZ.error = ""; restoreJsonFile(file); return; }
   WZ.busy = true; WZ.error = ""; renderWizard();
   try{
     const buf = await file.arrayBuffer();
