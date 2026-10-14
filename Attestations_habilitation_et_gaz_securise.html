@@ -2791,7 +2791,8 @@ const FORMAT_LABEL = {
   1:"V1 — ancienne feuille (tableau Filiale / Site / Établissement / Nom / Prénom)",
   2:"V2 — feuille « Intitulé de la session / Code session »",
   3:"V3 — feuille « extraction des signatures » (matricule + site)",
-  4:"V4 — feuille « Formation / Participants » (Syfadis, septembre 2026)"
+  4:"V4 — feuille « Formation / Participants » (Syfadis, septembre 2026)",
+  5:"V5 — feuille « Adecco Training » (Client / Nom Prénom / Matin / Après-midi / Nombre d'heures)"
 };
 /* anciens messages remplacés par les contrôles ci-dessous (évite les doublons) */
 const LEGACY_WARN = [
@@ -2820,8 +2821,8 @@ function finalizeEmargement(res, opts){
   /* --- obligatoires --- */
   if(!rows.length){
     missing.push("participants");
-    errors.push("Aucun participant n'a été lu sur cette feuille. Vérifiez qu'il s'agit bien du PDF d'origine "
-              + "(un exemplaire scanné ne contient qu'une image) ou collez la liste dans l'onglet 1.");
+    errors.push("Aucun participant n'a été lu sur cette feuille. Vérifiez qu'il s'agit bien de la feuille d'émargement "
+              + "(de face, lisible) ou collez la liste dans l'onglet 1.");
   }
   if(!CLEAN(s.intitule)){
     missing.push("intitulé");
@@ -2883,6 +2884,330 @@ function finalizeEmargement(res, opts){
   return res;
 }
 
+/* ============================================================================
+   V5 — feuille d'émargement « Adecco Training » (octobre 2026)
+   En-tête « Intitulé de la formation : … / Client : … / Date : Le mercredi 10 juin 2026 /
+   Intervenant : … / Lieu : … » + code de session « AFM_099019 », tableau « Nom Prénom /
+   Matin / Après-midi / Nombre d'heures », bloc « NOM Prénom : … Signature de l'intervenant »
+   (le formateur). Ni matricule, ni site, ni filiale sur ce modèle.
+   Deux voies d'entrée :
+     · PDF avec couche texte  → parseV5 (comme les autres modèles) ;
+     · PDF scanné (une image par page, sans texte) → lecture par reconnaissance de
+       caractères : v5ReadPage repère la grille du tableau, lit l'en-tête, chaque nom et le
+       bloc formateur. La présence se déduit de la colonne « Nombre d'heures » : un chiffre
+       manuscrit (7) = présent, un trait (/) = absent. Elle reste modifiable à l'écran.
+   ========================================================================== */
+const V5_MOIS = {janvier:1,fevrier:2,mars:3,avril:4,mai:5,juin:6,juillet:7,aout:8,septembre:9,octobre:10,novembre:11,decembre:12};
+
+/* « Le mercredi 10 juin 2026 » -> « 10/06/2026 » */
+function v5DateFr(txt){
+  const t = CLEAN(txt);
+  const m = /(\d{1,2})\s*(?:er)?\s+([A-Za-zÀ-ÿ]{3,9})\.?\s+(\d{4})/.exec(t);
+  if(m){
+    const mo = V5_MOIS[NOACC(m[2])];
+    if(mo) return m[1].padStart(2,"0") + "/" + String(mo).padStart(2,"0") + "/" + m[3];
+  }
+  const n = /(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/.exec(t);
+  return n ? n[1].padStart(2,"0") + "/" + n[2].padStart(2,"0") + "/" + n[3] : "";
+}
+
+/* codes d'habilitation mal lus (BO → B0, HO → H0, BIV → B1V) */
+function v5FixIntitule(s){
+  return CLEAN(String(s||"").replace(/[|_]+/g," ")).split(" ").map(t=>{
+    if(/^[BH][Oo0]{1,2}$/.test(t)) return t[0].toUpperCase() + "0";
+    if(/^B[Il]V$/.test(t)) return "B1V";
+    return t;
+  }).join(" ");
+}
+
+/* en-tête (texte lu ligne par ligne) -> intitulé, client, lieu, date, n° de session */
+function v5Header(txt){
+  const T = String(txt||"").replace(/[|¦]/g," ");
+  const LAB = /(Intitul[ée]e?\s+de\s+la\s+formation|Intervenants?|Client|Lieu(?:\s+de\s+la\s+formation)?|Date)\s*[:;]/gi;
+  const marks = []; let m;
+  while((m = LAB.exec(T))) marks.push({k:NOACC(m[1]), s:m.index, e:LAB.lastIndex});
+  const num = /\b([A-Z]{2,5})\s*[_\-]\s*(\d{4,})\b/.exec(T) || /\b(AFM)\s+(\d{4,})\b/.exec(T);
+  const numero = num ? num[1] + "_" + num[2] : "";
+  const out = {intitule:"", intervenant:"", client:"", lieu:"", dateTxt:"", numero};
+  marks.forEach((mk,i)=>{
+    const end = i+1<marks.length ? marks[i+1].s : T.length;
+    let val = T.slice(mk.e, end).split(/\n/)[0];
+    if(numero) val = val.replace(new RegExp("\\b"+num[1]+"[\\s_\\-]*"+num[2]+"\\b"), " ");
+    val = CLEAN(val).replace(/[\s\-–—_]+$/,"");
+    if(/^intitul/.test(mk.k)) { if(!out.intitule) out.intitule = v5FixIntitule(val); }
+    else if(/^intervenant/.test(mk.k)) { if(!out.intervenant) out.intervenant = val; }
+    else if(mk.k==="client") { if(!out.client) out.client = val; }
+    else if(/^lieu/.test(mk.k)) { if(!out.lieu) out.lieu = val; }
+    else if(mk.k==="date") { if(!out.dateTxt) out.dateTxt = v5DateFr(val); }
+  });
+  return out;
+}
+
+/* bloc « NOM Prénom : BENET / Christophe » -> « Christophe BENET » */
+function v5Formateur(txt){
+  const lines = String(txt||"").split(/\n/).map(l=>CLEAN(l.replace(/[_|¦]+/g," "))).filter(Boolean);
+  const i = lines.findIndex(l=>/pr[ée]nom\s*[:;]/i.test(l));
+  if(i<0) return "";
+  const letters = s => CLEAN(String(s||"").replace(/[^A-Za-zÀ-ÿ'’\- ]+/g," "));
+  const tok = letters(lines[i].replace(/^.*?pr[ée]nom\s*[:;]/i,"")).split(" ").filter(Boolean);
+  const nxt = lines[i+1] && !/signature/i.test(lines[i+1]) ? letters(lines[i+1]) : "";
+  let nom = "", prenom = "";
+  if(tok.length>=2){ nom = tok[0]; prenom = tok.slice(1).join(" "); }
+  else { nom = tok[0] || ""; prenom = nxt; }
+  nom = nom.toUpperCase(); prenom = titleCase(prenom);
+  return CLEAN(prenom + " " + nom);
+}
+
+/* nom lu dans une cellule : lettres, espaces, apostrophes et traits d'union seulement */
+function v5CleanName(s){
+  const t = CLEAN(String(s||"").replace(/[^A-Za-zÀ-ÿ'’\- ]+/g," ")).replace(/^[\-' ]+|[\-' ]+$/g,"");
+  return (t.match(/[A-Za-zÀ-ÿ]/g)||[]).length >= 2 ? t : "";
+}
+/* « ALLIEY Matthias » -> nom / prénom ; tout en capitales (« DELPAL EMILIE ») : 1er mot = nom */
+function v5SplitName(raw){
+  const parts = CLEAN(raw).split(" ").filter(Boolean);
+  if(parts.length<2 || parts.every(isUpperWord)) return splitNomPrenom(raw);
+  let n = 0;
+  while(n < parts.length-1 && (isUpperWord(parts[n]) || PARTICULES.includes(NOACC(parts[n])))) n++;
+  if(n===0) return splitNomPrenom(raw);
+  return {nom: parts.slice(0,n).join(" ").toUpperCase(), prenom: parts.slice(n).map(titleCase).join(" ")};
+}
+
+/* ---------- analyse d'image (niveaux de gris, Uint8Array w×h) ---------- */
+function v5Threshold(gray){
+  const hist = new Array(256).fill(0);
+  for(let i=0;i<gray.length;i++) hist[gray[i]]++;
+  const tot = gray.length; let sum = 0;
+  for(let i=0;i<256;i++) sum += i*hist[i];
+  let wB = 0, sB = 0, best = 0, thr = 128;
+  for(let t=0;t<256;t++){
+    wB += hist[t]; if(!wB) continue;
+    const wF = tot - wB; if(!wF) break;
+    sB += t*hist[t];
+    const mB = sB/wB, mF = (sum - sB)/wF, v = wB*wF*(mB-mF)*(mB-mF);
+    if(v>best){ best = v; thr = t; }
+  }
+  return Math.min(165, Math.max(110, thr + 8));
+}
+/* pixels appartenant à une ligne droite : séquence d'encre continue d'au moins minLen */
+function v5LongRuns(ink, w, h, minLen, horiz){
+  const m = new Uint8Array(w*h);
+  if(horiz){
+    for(let y=0;y<h;y++){
+      let x = 0;
+      while(x<w){
+        if(ink[y*w+x]){ const s = x; while(x<w && ink[y*w+x]) x++; if(x-s>=minLen) for(let k=s;k<x;k++) m[y*w+k] = 1; }
+        else x++;
+      }
+    }
+  } else {
+    for(let x=0;x<w;x++){
+      let y = 0;
+      while(y<h){
+        if(ink[y*w+x]){ const s = y; while(y<h && ink[y*w+x]) y++; if(y-s>=minLen) for(let k=s;k<y;k++) m[k*w+x] = 1; }
+        else y++;
+      }
+    }
+  }
+  return m;
+}
+function v5Dilate(m, w, h, r){
+  const a = new Uint8Array(w*h), b = new Uint8Array(w*h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(m[y*w+x]){
+    const x0 = Math.max(0,x-r), x1 = Math.min(w-1,x+r);
+    for(let k=x0;k<=x1;k++) a[y*w+k] = 1;
+  }
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(a[y*w+x]){
+    const y0 = Math.max(0,y-r), y1 = Math.min(h-1,y+r);
+    for(let k=y0;k<=y1;k++) b[k*w+x] = 1;
+  }
+  return b;
+}
+/* indices regroupés en bandes {a,b} (écart max « gap ») */
+function v5Clusters(idx, gap){
+  const out = [];
+  idx.forEach(v=>{ const l = out[out.length-1]; if(l && v-l.b<=gap) l.b = v; else out.push({a:v,b:v}); });
+  return out;
+}
+
+/* repère la grille du tableau : lignes horizontales, bords du tableau, colonnes */
+function v5Layout(gray, w, h){
+  const thr = v5Threshold(gray);
+  const ink = new Uint8Array(w*h);
+  for(let i=0;i<ink.length;i++) ink[i] = gray[i] < thr ? 1 : 0;
+  const hm = v5LongRuns(ink, w, h, Math.round(w*0.04), true);
+  const vm = v5LongRuns(ink, w, h, Math.round(h*0.04), false);
+  const hp = new Int32Array(h);
+  for(let y=0;y<h;y++){ let c = 0; for(let x=0;x<w;x++) c += hm[y*w+x]; hp[y] = c; }
+  const ys = []; for(let y=0;y<h;y++) if(hp[y] > 0.25*w) ys.push(y);
+  const hl = v5Clusters(ys, 12);
+  if(hl.length < 3) return null;
+  /* lignes de rangées : à partir de la 2e ligne (sous l'en-tête de colonnes), hauteur régulière */
+  const ctr = hl.map(c=>(c.a+c.b)/2);
+  const rh = ctr[2] - ctr[1];
+  const bands = [];
+  for(let k=1;k+1<hl.length;k++){
+    const d = ctr[k+1] - ctr[k];
+    if(Math.abs(d - rh) > 0.25*rh) break;
+    bands.push({y0:hl[k].b+3, y1:hl[k+1].a-3});
+  }
+  if(!bands.length) return null;
+  /* bords gauche / droit du tableau : étendue de la ligne d'en-tête de colonnes */
+  /* (une feuille légèrement penchée ne montre qu'un tronçon de chaque ligne par rangée de pixels :
+     on prend donc l'étendue de toutes les lignes du tableau) */
+  let L = w, R = 0;
+  const yA = Math.max(0, hl[0].a - 30), yB = Math.min(h-1, bands[bands.length-1].y1 + 30);
+  for(let y=yA;y<=yB;y++) for(let x=0;x<w;x++) if(hm[y*w+x]){ if(x<L) L = x; if(x>R) R = x; }
+  if(R-L < 0.4*w) return null;
+  /* bord droit de la colonne « Nom Prénom » : 1re verticale franche à droite de 0,2 × largeur du tableau */
+  const vp = new Int32Array(w);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++) vp[x] += vm[y*w+x];
+  const xs = []; for(let x=0;x<w;x++) if(vp[x] > 0.12*h) xs.push(x);
+  const vc = v5Clusters(xs, 12).map(c=>(c.a+c.b)/2);
+  const tw = R - L;
+  let col1R = vc.find(x=> x > L + 0.2*tw && x < L + 0.6*tw);
+  if(col1R==null) col1R = L + 0.375*tw;
+  const lineMask = v5Dilate(hm.map((v,i)=>v|vm[i]), w, h, 3);
+  return {thr, ink, lineMask, hl, bands, tableTop:hl[0].a, tableBottom:hl[hl.length>bands.length+1 ? bands.length+1 : hl.length-1].b,
+          L, R, tw, col1R, hoursL: L + 0.86*tw, hoursR: R - 0.01*tw};
+}
+
+/* découpe binaire (encre sans lignes de grille) -> image gris {data,w,h}, fond blanc + marge */
+function v5Crop(lay, w, x0, y0, x1, y1, pad){
+  pad = pad==null ? 24 : pad;
+  x0 = Math.max(0,Math.round(x0)); y0 = Math.max(0,Math.round(y0));
+  x1 = Math.round(x1); y1 = Math.round(y1);
+  const cw = x1-x0, ch = y1-y0;
+  const out = {w:cw+2*pad, h:ch+2*pad, data:null};
+  out.data = new Uint8Array(out.w*out.h).fill(255);
+  let n = 0;
+  for(let y=0;y<ch;y++) for(let x=0;x<cw;x++){
+    const i = (y0+y)*w + (x0+x);
+    if(lay.ink[i] && !lay.lineMask[i]){ out.data[(y+pad)*out.w + x+pad] = 0; n++; }
+  }
+  out.ink = n;
+  return out;
+}
+/* en-tête : image en niveaux de gris d'origine (pas de grille au-dessus du tableau) */
+function v5CropGray(gray, w, x0, y0, x1, y1, pad){
+  pad = pad==null ? 24 : pad;
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const cw = x1-x0, ch = y1-y0;
+  const out = {w:cw+2*pad, h:ch+2*pad};
+  out.data = new Uint8Array(out.w*out.h).fill(255);
+  for(let y=0;y<ch;y++) for(let x=0;x<cw;x++) out.data[(y+pad)*out.w + x+pad] = gray[(y0+y)*w + (x0+x)];
+  return out;
+}
+/* présence d'après la colonne « Nombre d'heures » : chiffre = présent, trait « / » = absent */
+function v5Hours(lay, w, band){
+  const x0 = Math.round(lay.hoursL), x1 = Math.round(lay.hoursR);
+  const y0 = band.y0 + 6, y1 = band.y1 - 6;
+  const xs = [], ys = [];
+  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
+    const i = y*w + x;
+    if(lay.ink[i] && !lay.lineMask[i]){ xs.push(x); ys.push(y); }
+  }
+  if(xs.length < 80) return {state:"vide"};
+  xs.sort((a,b)=>a-b); ys.sort((a,b)=>a-b);
+  const q = (a,p)=> a[Math.min(a.length-1, Math.max(0, Math.round(p*(a.length-1))))];
+  const bw = q(xs,0.98) - q(xs,0.02) + 1, bh = q(ys,0.98) - q(ys,0.02) + 1;
+  const cell = x1 - x0;
+  const wide = bw > 0.28*cell && bw/bh > 1.5;
+  return {state: wide ? "trait" : "chiffre", w:bw, h:bh};
+}
+
+/* lit une page : en-tête, noms, présence, formateur. ocr(image, psm) -> texte */
+async function v5ReadPage(gray, w, h, ocr){
+  const lay = v5Layout(gray, w, h);
+  if(!lay) return null;
+  const head = await ocr(v5CropGray(gray, w, 0, Math.round(0.1*h), w, lay.tableTop-6), "6");
+  const rows = [];
+  for(const band of lay.bands){
+    const c = v5Crop(lay, w, lay.L+8, band.y0+4, lay.col1R-8, band.y1-4);
+    if(c.ink < 150) continue;                         // rangée vide
+    const raw = v5CleanName(await ocr(c, "7"));
+    const hrs = v5Hours(lay, w, band);
+    rows.push({raw, hours:hrs.state});
+  }
+  const bottom = lay.hl[lay.bands.length+1] ? lay.hl[lay.bands.length+1].b : lay.hl[lay.hl.length-1].b;
+  const fy1 = Math.min(h, bottom + Math.round(0.125*h));
+  const box = v5Crop(lay, w, lay.L+8, bottom+8, lay.col1R-8, fy1);
+  const trainer = box.ink > 150 ? await ocr(box, "6") : "";
+  return {head, rows, trainer, w, h};
+}
+
+/* pages lues -> résultat au format commun (comme parseV1…V4) */
+function v5Build(pages, warnings, mode){
+  const H = {intitule:"", intervenant:"", client:"", lieu:"", dateTxt:"", numero:""};
+  let formateur = "";
+  const rows = [];
+  let unsure = 0, absents = [];
+  pages.forEach(p=>{
+    const h = p.header || v5Header(p.head);
+    Object.keys(H).forEach(k=>{ if(!H[k] && h[k]) H[k] = h[k]; });
+    if(!formateur) formateur = p.formateur || v5Formateur(p.trainer);
+    p.rows.forEach(r=>{
+      const nm = r.raw ? v5SplitName(r.raw) : {nom:"",prenom:""};
+      const absent = !!r.absent || r.hours==="trait";
+      if(r.hours==="vide") unsure++;
+      if(absent) absents.push(CLEAN(nm.nom + " " + nm.prenom));
+      rows.push({nom:nm.nom, prenom:nm.prenom, matricule:"", site:"", filiale:"", etab:"", fonction:"", absent});
+    });
+  });
+  if(mode==="ocr"){
+    warnings.push("Feuille scannée : l'intitulé, la date, les noms et le formateur ont été lus par reconnaissance de caractères — vérifiez l'orthographe de chaque nom et corrigez-la dans l'onglet 1 si besoin.");
+    if(absents.length)
+      warnings.push("Absents repérés d'après la colonne « Nombre d'heures » (trait = absent, chiffre = présent) : " + absents.join(", ")
+                  + ". Cochez ou décochez « Absent » ci-dessous si la lecture est inexacte.");
+    if(unsure)
+      warnings.push("Colonne « Nombre d'heures » illisible ou vide pour " + unsure + " participant" + (unsure>1?"s":"") + " : considéré" + (unsure>1?"s":"")
+                  + " présent" + (unsure>1?"s":"") + " — à vérifier avec la case « Absent ».");
+  }
+  if(H.client) warnings.push("Client indiqué sur la feuille : « " + H.client + " » — la filiale reste à saisir à la main.");
+  return {
+    version:5, ocr: mode==="ocr",
+    session:{
+      dateISO: isoFromFr(H.dateTxt), dateFinISO: isoFromFr(H.dateTxt), dateTxt: H.dateTxt,
+      lieu: H.lieu, duree:"7", numero: H.numero, numeroSource: H.numero ? "feuille" : "",
+      intitule: H.intitule, formateur, organisme:"", societe: H.client,
+      heureDebut:"", heureFin:""
+    },
+    rows, warnings
+  };
+}
+
+/* version « couche texte » (PDF d'origine non scanné) */
+function looksV5(lines){
+  const t = NOACC(lines.map(l=>l.text).join("\n"));
+  return /intitule de la formation/.test(t) && /\bclient\s*:/.test(t) && /nom\s+prenom/.test(t) && /\bmatin\b/.test(t);
+}
+function parseV5(items, lines, warnings){
+  const isHdr = l => /nom\s+pr[ée]nom/i.test(l.text) && /matin/i.test(l.text);
+  const hi = lines.findIndex(isHdr);
+  const head = lines.slice(0, hi).map(l=>l.text).join("\n");
+  const rows = [], boxTxt = [];
+  let xLim = Infinity, inBox = false;
+  for(let i=hi;i<lines.length;i++){
+    const l = lines[i];
+    if(isHdr(l)){
+      inBox = false;
+      const m = l.items.find(it=>/^matin/i.test(CLEAN(it.str)));
+      if(m) xLim = m.x - 40;
+      continue;
+    }
+    if(/nom\s+pr[ée]nom\s*[:;]/i.test(l.text)) inBox = true;
+    if(inBox){ boxTxt.push(l.text); continue; }
+    if(/capital de|siege social|adeccotraining|signature de l/i.test(NOACC(l.text))) continue;
+    const left = CLEAN(l.items.filter(it=>it.x < xLim).map(it=>it.str).join(" "));
+    const name = v5CleanName(left);
+    if(!name) continue;
+    const right = l.items.filter(it=>it.x >= xLim).map(it=>it.str).join(" ");
+    rows.push({raw:name, hours: /\babs(?:ent)?\b/i.test(right) ? "trait" : "chiffre"});
+  }
+  const pages = [{head, rows, trainer:boxTxt.join("\n")}];
+  return v5Build(pages, warnings, "text");
+}
+
 /* ---------- point d'entrée ---------- */
 function parseEmargement(items, opts){
   const lines = toLines(items);
@@ -2893,7 +3218,8 @@ function parseEmargement(items, opts){
      peut donc être détournée vers un lecteur plus récent. Puis V3 (« Durée de
      la séance »), puis V4 (« Feuille d'émargement » + « Nom de la formation »),
      et enfin V1 par défaut. */
-  const res = looksV2(lines) ? parseV2(items, lines, warnings)
+  const res = looksV5(lines) ? parseV5(items, lines, warnings)
+            : looksV2(lines) ? parseV2(items, lines, warnings)
             : looksV3(lines) ? parseV3(items, lines, warnings)
             : looksV4(lines) ? parseV4(items, lines, warnings, o)
             : parseV1(items, lines, warnings);
@@ -3499,9 +3825,9 @@ const KEY = "fd-attestations-v2";
 
 const HAB = ["BS","BS BC B2","BS B0 H0 BE Manœuvre","BR B1V H0","BR B1V H0 BC B2"];
 const FILIALES = ["SAV","DGO","DGE","DIF","DARTY","FNAC"];
-const FONCTIONS = ["Technicien","Livreur","Encadrant technique","Encadrant livraison","Encadrant magasin"];
+const FONCTIONS = ["Technicien","Livreur","Encadrant technique","Encadrant livraison","Encadrant magasin","Vendeur","Conseiller pôle services","Technicien conseil pôle services"];
 /* formes féminines de la fonction, proposées dans la liste de choix (plus de civilité : saisie libre) */
-const FONC_FEM = [["Technicien","Technicienne"],["Livreur","Livreuse"],["Encadrant","Encadrante"]];
+const FONC_FEM = [["Technicien","Technicienne"],["Livreur","Livreuse"],["Encadrant","Encadrante"],["Vendeur","Vendeuse"],["Conseiller","Conseillère"]];
 function fonctionFem(f){
   f = String(f||"").trim();
   for(const [m,w] of FONC_FEM){ if(f===m || f.indexOf(m+" ")===0) return w + f.slice(m.length); }
@@ -4647,12 +4973,12 @@ function renderWizard(){
     body.innerHTML = `
       <div class="drop" id="dropzone">
         <h3>${WZ.busy ? "Lecture du PDF…" : "Déposez le PDF d'émargement ici"}</h3>
-        <p>${WZ.busy ? "Extraction de l'en-tête et des participants." : "ou choisissez le fichier sur votre poste"}</p>
+        <p id="wizStatus">${WZ.busy ? esc(WZ.status || "Extraction de l'en-tête et des participants.") : "ou choisissez le fichier sur votre poste"}</p>
         <button class="primary" id="pickPdf"${WZ.busy?" disabled":""}>Choisir un fichier PDF</button>
       </div>
       ${WZ.error ? `<div class="msg err">${esc(WZ.error)}</div>` : ""}
-      <p class="hint">Prenez le PDF d'origine, avant impression et signature : un exemplaire scanné ne contient qu'une image, sans texte lisible. Les feuilles protégées en écriture sont acceptées.</p>
-      <p class="hint">Modèles reconnus automatiquement : feuille «&nbsp;Formation / Participants&nbsp;» (2026), feuille «&nbsp;extraction des signatures&nbsp;» (matricule + site), feuille «&nbsp;Intitulé de la session / Code session&nbsp;» et ancien tableau «&nbsp;Filiale / Site / Nom / Prénom&nbsp;».</p>`;
+      <p class="hint">Le PDF d'origine (avant impression et signature) est lu directement. Une feuille <strong>scannée</strong> (image, sans texte) est lue par reconnaissance de caractères pour le modèle Adecco Training : vérifiez alors les noms et les absents à l'étape suivante (connexion Internet requise la première fois). Les feuilles protégées en écriture sont acceptées.</p>
+      <p class="hint">Modèles reconnus automatiquement : feuille «&nbsp;Formation / Participants&nbsp;» (2026), feuille «&nbsp;extraction des signatures&nbsp;» (matricule + site), feuille «&nbsp;Intitulé de la session / Code session&nbsp;», feuille «&nbsp;Adecco Training&nbsp;» (Client / Nom Prénom / Matin / Après-midi, PDF ou scan) et ancien tableau «&nbsp;Filiale / Site / Nom / Prénom&nbsp;».</p>`;
     const saved = hasSaved();
     foot.innerHTML = `<button id="wizCancel" class="ghost">Annuler</button>
       <div class="spacer"></div>
@@ -4691,9 +5017,9 @@ function renderWizard(){
         <button class="tiny ghost" id="wSwapAll">⇄ Permuter nom / prénom</button>
       </div>
       <div class="prevwrap"><table class="prev">
-        <thead><tr><th>#</th><th>Nom</th><th>Prénom</th><th>Matricule</th><th>Site</th><th>Filiale</th></tr></thead>
-        <tbody>${p.rows.map((r,i)=>`<tr><td>${i+1}</td><td><strong>${esc((r.nom||"").toUpperCase())}</strong></td><td>${esc(r.prenom)}</td><td>${esc(matriculeOK(r.matricule))}</td><td>${esc(r.site)}${r.avis==="A"?' <em>(absent)</em>':""}</td><td>${esc(r.filiale)}</td></tr>`).join("")
-          || `<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--muted)">Aucun participant lu — vous pourrez les saisir ensuite.</td></tr>`}</tbody>
+        <thead><tr><th>#</th><th>Nom</th><th>Prénom</th><th>Matricule</th><th>Site</th><th>Filiale</th><th>Absent</th></tr></thead>
+        <tbody>${p.rows.map((r,i)=>`<tr><td>${i+1}</td><td><strong>${esc((r.nom||"").toUpperCase())}</strong></td><td>${esc(r.prenom)}</td><td>${esc(matriculeOK(r.matricule))}</td><td>${esc(r.site)}</td><td>${esc(r.filiale)}</td><td style="text-align:center"><input type="checkbox" data-wabs="${i}" aria-label="Absent"${r.avis==="A"?" checked":""}></td></tr>`).join("")
+          || `<tr><td colspan="7" style="padding:16px;text-align:center;color:var(--muted)">Aucun participant lu — vous pourrez les saisir ensuite.</td></tr>`}</tbody>
       </table></div>
       <p class="hint">Le matricule et le site sont lus sur la feuille&nbsp;; la <strong>filiale</strong> reste à saisir à la main (bouton «&nbsp;Filiale / site pour tous…&nbsp;» dans l'onglet&nbsp;1).</p>`;
     foot.innerHTML = `<button id="wizBack" class="ghost">← Choisir un autre fichier</button>
@@ -4703,6 +5029,82 @@ function renderWizard(){
   }
 }
 
+/* ---------- feuille « Adecco Training » scannée : lecture par reconnaissance de caractères ---------- */
+/* images JPEG (une par page) d'un PDF scanné : flux « stream » commençant par FF D8 FF */
+function v5FindJpegs(b){
+  const out = [];
+  for(let i=0;i<b.length-12;i++){
+    if(b[i]!==115||b[i+1]!==116||b[i+2]!==114||b[i+3]!==101||b[i+4]!==97||b[i+5]!==109) continue;   // « stream »
+    if(i>=3 && b[i-3]===101 && b[i-2]===110 && b[i-1]===100) continue;                               // « endstream »
+    let s = i+6; if(b[s]===13) s++; if(b[s]===10) s++;
+    if(b[s]===0xFF && b[s+1]===0xD8 && b[s+2]===0xFF){
+      let e = s;
+      for(;e<b.length-9;e++) if(b[e]===101&&b[e+1]===110&&b[e+2]===100&&b[e+3]===115&&b[e+4]===116) break;   // « endst… »
+      let t = e; while(t>s && (b[t-1]===10||b[t-1]===13||b[t-1]===32)) t--;
+      out.push(b.slice(s,t)); i = e;
+    }
+  }
+  return out;
+}
+function wizSetStatus(t){ WZ.status = t; const el = $("#wizStatus"); if(el) el.textContent = t; }
+
+/* image JPEG -> niveaux de gris, ramenée à ~3100 px de large (les seuils de l'analyse en dépendent) */
+function v5Decode(jpg){
+  return new Promise((ok,ko)=>{
+    const url = URL.createObjectURL(new Blob([jpg], {type:"image/jpeg"})), im = new Image();
+    im.onload = ()=>{
+      const k = Math.min(1.25, Math.max(0.5, 3100/im.width));
+      const w = Math.round(im.width*k), h = Math.round(im.height*k);
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const x = c.getContext("2d", {willReadFrequently:true});
+      x.fillStyle = "#fff"; x.fillRect(0,0,w,h);
+      x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, w, h);
+      const d = x.getImageData(0,0,w,h).data, g = new Uint8Array(w*h);
+      for(let i=0;i<g.length;i++) g[i] = (d[i*4]*0.299 + d[i*4+1]*0.587 + d[i*4+2]*0.114)|0;
+      URL.revokeObjectURL(url); ok({gray:g, w, h});
+    };
+    im.onerror = ()=>{ URL.revokeObjectURL(url); ko(new Error("Image de la feuille illisible.")); };
+    im.src = url;
+  });
+}
+
+let tessScan = null;
+async function v5Worker(){
+  if(tessScan) return tessScan;
+  const T = await loadTess();
+  tessScan = await T.createWorker("fra", 1, {logger: m=>{
+    if(m && m.status==="recognizing text" && WZ.busy) wizSetStatus((WZ.baseStatus||"Lecture de la feuille…")+" "+Math.round((m.progress||0)*100)+" %");
+  }});
+  return tessScan;
+}
+
+/* PDF scanné -> résultat au format commun (null si le PDF ne contient aucune image) */
+async function v5ScanPdf(bytes){
+  const jpgs = v5FindJpegs(bytes);
+  if(!jpgs.length) return null;
+  wizSetStatus("Feuille scannée : chargement du module de lecture (première fois uniquement)…");
+  const worker = await v5Worker();
+  const ocr = async (crop, psm)=>{
+    await worker.setParameters({tessedit_pageseg_mode: psm});
+    const c = document.createElement("canvas"); c.width = crop.w; c.height = crop.h;
+    const x = c.getContext("2d"), id = x.createImageData(crop.w, crop.h);
+    for(let i=0;i<crop.data.length;i++){ const v = crop.data[i]; id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=v; id.data[i*4+3]=255; }
+    x.putImageData(id,0,0);
+    const r = await worker.recognize(c);
+    return r.data.text || "";
+  };
+  const pages = [];
+  for(let i=0;i<jpgs.length;i++){
+    WZ.baseStatus = "Lecture de la page "+(i+1)+" / "+jpgs.length+"…";
+    wizSetStatus(WZ.baseStatus);
+    const img = await v5Decode(jpgs[i]);
+    const p = await v5ReadPage(img.gray, img.w, img.h, ocr);
+    if(!p) throw new Error("Tableau d'émargement non reconnu sur la page "+(i+1)+" : la feuille doit être de face, bien cadrée, avec les lignes du tableau visibles.");
+    pages.push(p);
+  }
+  return v5Build(pages, [], "ocr");
+}
+
 async function handlePdf(file){
   if(!file) return;
   WZ.busy = true; WZ.error = ""; renderWizard();
@@ -4710,15 +5112,22 @@ async function handlePdf(file){
     const buf = await file.arrayBuffer();
     const rawCopy = new Uint8Array(buf.slice(0));   /* copie avant lecture : le lecteur PDF peut vider le tampon */
     const items = await extractItems(buf);
+    let res;
     if(!items.length){
-      WZ.busy = false;
-      WZ.error = items.encrypted
-        ? "Ce PDF est protégé par un chiffrement non pris en charge (" + items.encrypted + "). Ouvrez-le puis ré-enregistrez-le en PDF, ou collez la liste des participants depuis l'onglet 1."
-        : "Ce PDF ne contient aucun texte : c'est une image (feuille scannée ou photographiée). Utilisez le PDF d'origine avant signature, ou collez la liste des participants depuis l'onglet 1.";
-      renderWizard(); return;
+      /* PDF sans texte : feuille scannée (Adecco) -> lecture par reconnaissance de caractères */
+      const scanned = items.encrypted ? null : await v5ScanPdf(rawCopy);
+      if(!scanned){
+        WZ.busy = false;
+        WZ.error = items.encrypted
+          ? "Ce PDF est protégé par un chiffrement non pris en charge (" + items.encrypted + "). Ouvrez-le puis ré-enregistrez-le en PDF, ou collez la liste des participants depuis l'onglet 1."
+          : "Ce PDF ne contient ni texte ni image de feuille exploitable. Utilisez le PDF d'origine ou un scan de la feuille, ou collez la liste des participants depuis l'onglet 1.";
+        renderWizard(); return;
+      }
+      res = finalizeEmargement(scanned, {fileName: file.name || ""});
+    } else {
+      /* le nom du fichier sert de repli pour le n° de session (« HE 3552.pdf ») */
+      res = parseEmargement(items, {fileName: file.name || ""});
     }
-    /* le nom du fichier sert de repli pour le n° de session (« HE 3552.pdf ») */
-    const res = parseEmargement(items, {fileName: file.name || ""});
     const guess = guessType(res.session.intitule) || {type:S.session.type, habilitation:S.session.habilitation};
     WZ.busy = false;
     WZ.parsed = {
@@ -5004,6 +5413,12 @@ document.addEventListener("input", e=>{
 });
 document.addEventListener("change", e=>{
   const el = e.target;
+  if(el.dataset && el.dataset.wabs!=null && WZ.parsed){
+    syncWizForm();
+    const r = WZ.parsed.rows[+el.dataset.wabs], a = el.checked;
+    if(r){ r.avis = a ? "A" : "F"; r.elearn = a ? "NON" : "OUI"; r.pratique = a ? "NON" : "OUI"; }
+    renderWizard(); return;
+  }
   if(el.id==="wPerimetre"){ el.classList.toggle("vide", !el.value); syncWizForm(); return; }
   if(el.id==="wType"){ syncWizForm(); renderWizard(); return; }
   if(el.id==="filePdf" && el.files && el.files[0]){ handlePdf(el.files[0]); el.value=""; return; }
