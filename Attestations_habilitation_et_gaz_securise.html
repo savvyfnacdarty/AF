@@ -314,7 +314,7 @@ label.f:has(.vide){color:var(--bad)}
   <div class="brand">
     <a href="index.html" title="Retour à l'accueil"><img id="brandLogo" alt="Académie Fnac Darty"></a>
     <div>
-      <h1>Attestations de formation <span id="appVersion" class="appver">v6.8</span></h1>
+      <h1>Attestations de formation <span id="appVersion" class="appver">v6.9</span></h1>
       <p>Habilitation électrique &amp; Règles de sécurité gaz</p>
     </div>
   </div>
@@ -2923,7 +2923,7 @@ function v5FixIntitule(s){
 /* en-tête (texte lu ligne par ligne) -> intitulé, client, lieu, date, n° de session */
 function v5Header(txt){
   const T = String(txt||"").replace(/[|¦]/g," ");
-  const LAB = /(Intitul[ée]e?\s+de\s+la\s+formation|Intervenants?|Client|Lieu(?:\s+de\s+la\s+formation)?|Date)\s*[:;]/gi;
+  const LAB = /(I?ntitul[ée]e?\s+de\s+la\s+formation|Intervenants?|Client|Lieu(?:\s+de\s+la\s+formation)?|Date)\s*[:;]/gi;
   const marks = []; let m;
   while((m = LAB.exec(T))) marks.push({k:NOACC(m[1]), s:m.index, e:LAB.lastIndex});
   const num = /\b([A-Z]{2,5})\s*[_\-]\s*(\d{4,})\b/.exec(T) || /\b(AFM)\s+(\d{4,})\b/.exec(T);
@@ -2933,8 +2933,8 @@ function v5Header(txt){
     const end = i+1<marks.length ? marks[i+1].s : T.length;
     let val = T.slice(mk.e, end).split(/\n/)[0];
     if(numero) val = val.replace(new RegExp("\\b"+num[1]+"[\\s_\\-]*"+num[2]+"\\b"), " ");
-    val = CLEAN(val).replace(/[\s\-–—_]+$/,"");
-    if(/^intitul/.test(mk.k)) { if(!out.intitule) out.intitule = v5FixIntitule(val); }
+    val = CLEAN(val).replace(/[\s\-–—_=|:;.,~]+$/,"");
+    if(/^i?ntitul/.test(mk.k)) { if(!out.intitule) out.intitule = v5FixIntitule(val); }
     else if(/^intervenant/.test(mk.k)) { if(!out.intervenant) out.intervenant = val; }
     else if(mk.k==="client") { if(!out.client) out.client = val; }
     else if(/^lieu/.test(mk.k)) { if(!out.lieu) out.lieu = val; }
@@ -3055,9 +3055,17 @@ function v5Layout(gray, w, h){
   /* bords gauche / droit du tableau : étendue de la ligne d'en-tête de colonnes */
   /* (une feuille légèrement penchée ne montre qu'un tronçon de chaque ligne par rangée de pixels :
      on prend donc l'étendue de toutes les lignes du tableau) */
-  let L = w, R = 0;
-  const yA = Math.max(0, hl[0].a - 30), yB = Math.min(h-1, bands[bands.length-1].y1 + 30);
-  for(let y=yA;y<=yB;y++) for(let x=0;x<w;x++) if(hm[y*w+x]){ if(x<L) L = x; if(x>R) R = x; }
+  /* médiane des étendues de chaque ligne du tableau : un trait de scanner qui traverse toute la page
+     ne fausse plus les bords (il ne touche qu'une ou deux lignes) */
+  const mins = [], maxs = [];
+  hl.forEach(c=>{
+    let a = w, b = 0;
+    for(let y=Math.max(0,c.a-8);y<=Math.min(h-1,c.b+8);y++) for(let x=0;x<w;x++) if(hm[y*w+x]){ if(x<a) a = x; if(x>b) b = x; }
+    if(b>a){ mins.push(a); maxs.push(b); }
+  });
+  if(!mins.length) return null;
+  mins.sort((p,q)=>p-q); maxs.sort((p,q)=>p-q);
+  const L = mins[mins.length>>1], R = maxs[maxs.length>>1];
   if(R-L < 0.4*w) return null;
   /* bord droit de la colonne « Nom Prénom » : 1re verticale franche à droite de 0,2 × largeur du tableau */
   const vp = new Int32Array(w);
@@ -3116,18 +3124,40 @@ function v5Hours(lay, w, band){
   return {state: wide ? "trait" : "chiffre", w:bw, h:bh};
 }
 
-/* lit une page : en-tête, noms, présence, formateur. ocr(image, psm) -> texte */
-async function v5ReadPage(gray, w, h, ocr){
-  const lay = v5Layout(gray, w, h);
+/* encre (hors lignes de grille) dans un rectangle */
+function v5Ink(lay, w, x0, y0, x1, y1){
+  let n = 0;
+  for(let y=Math.round(y0);y<Math.round(y1);y++) for(let x=Math.round(x0);x<Math.round(x1);x++){
+    const i = y*w + x;
+    if(lay.ink[i] && !lay.lineMask[i]) n++;
+  }
+  return n;
+}
+/* en-tête lisible ? (au moins 3 des étiquettes Intitulé / Client / Intervenant / Lieu / Date) : sert à valider le sens de la page */
+function v5HeadOk(t){
+  const s = NOACC(t);
+  return ["formation","client","intervenant","lieu","date"].filter(k=>s.indexOf(k)>=0).length >= 3;
+}
+/* lit une page : en-tête, noms, présence, formateur. ocr(image, psm) -> texte.
+   accept(head) : si fourni et faux, la page est abandonnée tout de suite (mauvais sens de lecture). */
+async function v5ReadPage(gray, w, h, ocr, lay, accept){
+  lay = lay || v5Layout(gray, w, h);
   if(!lay) return null;
-  const head = await ocr(v5CropGray(gray, w, 0, Math.round(0.1*h), w, lay.tableTop-6), "6");
+  /* texte de l'en-tête à gauche, code de session (AFM_xxxxxx) à droite : lus séparément pour ne pas être mélangés */
+  const hy0 = Math.round(0.1*h), hy1 = lay.tableTop-6, hx = Math.round(0.7*w);
+  if(hy1 - hy0 < 60 || lay.col1R - lay.L < 80) return null;   // géométrie impossible : mauvais sens de lecture
+  const headL = await ocr(v5CropGray(gray, w, 0, hy0, hx, hy1), "6");
+  const headR = await ocr(v5CropGray(gray, w, hx, hy0, w, hy1), "6");
+  const head = headL + "\n" + headR;
+  if(accept && !accept(head)) return null;
   const rows = [];
   for(const band of lay.bands){
     const c = v5Crop(lay, w, lay.L+8, band.y0+4, lay.col1R-8, band.y1-4);
     if(c.ink < 150) continue;                         // rangée vide
     const raw = v5CleanName(await ocr(c, "7"));
     const hrs = v5Hours(lay, w, band);
-    rows.push({raw, hours:hrs.state});
+    const sig = v5Ink(lay, w, lay.col1R+10, band.y0+6, lay.hoursL-10, band.y1-6);   // signatures matin / après-midi
+    rows.push({raw, hours:hrs.state, sig});
   }
   const bottom = lay.hl[lay.bands.length+1] ? lay.hl[lay.bands.length+1].b : lay.hl[lay.hl.length-1].b;
   const fy1 = Math.min(h, bottom + Math.round(0.125*h));
@@ -3136,28 +3166,36 @@ async function v5ReadPage(gray, w, h, ocr){
   return {head, rows, trainer, w, h};
 }
 
+const V5_SIG_MIN = 400;   // pixels d'encre minimum dans les colonnes de signatures pour considérer la ligne signée
 /* pages lues -> résultat au format commun (comme parseV1…V4) */
 function v5Build(pages, warnings, mode){
   const H = {intitule:"", intervenant:"", client:"", lieu:"", dateTxt:"", numero:""};
   let formateur = "";
   const rows = [];
-  let unsure = 0, absents = [];
+  let unsure = 0, absents = [], noSig = [];
   pages.forEach(p=>{
     const h = p.header || v5Header(p.head);
     Object.keys(H).forEach(k=>{ if(!H[k] && h[k]) H[k] = h[k]; });
     if(!formateur) formateur = p.formateur || v5Formateur(p.trainer);
     p.rows.forEach(r=>{
       const nm = r.raw ? v5SplitName(r.raw) : {nom:"",prenom:""};
-      const absent = !!r.absent || r.hours==="trait";
-      if(r.hours==="vide") unsure++;
+      /* présence : chiffre = présent, trait = absent ; colonne « Nombre d'heures » vide -> d'après les signatures
+         (matin / après-midi) : aucune encre = absent */
+      const unsigned = r.hours==="vide" && r.sig!=null && r.sig < V5_SIG_MIN;
+      const absent = !!r.absent || r.hours==="trait" || unsigned;
+      if(r.hours==="vide" && !unsigned) unsure++;
+      if(unsigned) noSig.push(CLEAN(nm.nom + " " + nm.prenom));
       if(absent) absents.push(CLEAN(nm.nom + " " + nm.prenom));
       rows.push({nom:nm.nom, prenom:nm.prenom, matricule:"", site:"", filiale:"", etab:"", fonction:"", absent});
     });
   });
   if(mode==="ocr"){
     warnings.push("Feuille scannée : l'intitulé, la date, les noms et le formateur ont été lus par reconnaissance de caractères — vérifiez l'orthographe de chaque nom et corrigez-la dans l'onglet 1 si besoin.");
-    if(absents.length)
-      warnings.push("Absents repérés d'après la colonne « Nombre d'heures » (trait = absent, chiffre = présent) : " + absents.join(", ")
+    if(noSig.length)
+      warnings.push("Sans heures ni signature sur la feuille (considéré" + (noSig.length>1?"s":"") + " absent" + (noSig.length>1?"s":"") + ") : " + noSig.join(", ") + ". Décochez « Absent » à l'étape suivante si la lecture est inexacte.");
+    const absOnly = absents.filter(n=>noSig.indexOf(n)<0);
+    if(absOnly.length)
+      warnings.push("Absents repérés d'après la colonne « Nombre d'heures » (trait = absent, chiffre = présent) : " + absOnly.join(", ")
                   + ". Cochez ou décochez « Absent » ci-dessous si la lecture est inexacte.");
     if(unsure)
       warnings.push("Colonne « Nombre d'heures » illisible ou vide pour " + unsure + " participant" + (unsure>1?"s":"") + " : considéré" + (unsure>1?"s":"")
@@ -4982,7 +5020,7 @@ function renderWizard(){
         <button class="primary" id="pickPdf"${WZ.busy?" disabled":""}>Choisir un fichier PDF ou .json</button>
       </div>
       ${WZ.error ? `<div class="msg err">${esc(WZ.error)}</div>` : ""}
-      <p class="hint">Le PDF d'origine (avant impression et signature) est lu directement. Une feuille <strong>scannée</strong> (image, sans texte) est lue par reconnaissance de caractères pour le modèle Adecco Training : vérifiez alors les noms et les absents à l'étape suivante (connexion Internet requise la première fois). Les feuilles protégées en écriture sont acceptées.</p>
+      <p class="hint">Le PDF d'origine (avant impression et signature) est lu directement. Une feuille <strong>scannée</strong> (image, sans texte) est lue par reconnaissance de caractères pour le modèle Adecco Training (page à l'endroit ou pivotée, sens détecté automatiquement) : vérifiez alors les noms et les absents à l'étape suivante (connexion Internet requise la première fois). Les feuilles protégées en écriture sont acceptées.</p>
       <p class="hint">Modèles reconnus automatiquement : feuille «&nbsp;Formation / Participants&nbsp;» (2026), feuille «&nbsp;extraction des signatures&nbsp;» (matricule + site), feuille «&nbsp;Intitulé de la session / Code session&nbsp;», feuille «&nbsp;Adecco Training&nbsp;» (Client / Nom Prénom / Matin / Après-midi, PDF ou scan) et ancien tableau «&nbsp;Filiale / Site / Nom / Prénom&nbsp;».</p>`;
     const saved = hasSaved();
     foot.innerHTML = `<button id="wizCancel" class="ghost">Annuler</button>
@@ -5053,17 +5091,22 @@ function v5FindJpegs(b){
 }
 function wizSetStatus(t){ WZ.status = t; const el = $("#wizStatus"); if(el) el.textContent = t; }
 
-/* image JPEG -> niveaux de gris, ramenée à ~3100 px de large (les seuils de l'analyse en dépendent) */
-function v5Decode(jpg){
+/* image JPEG -> niveaux de gris, tournée de rot° (sens horaire), ramenée à ~3100 px de large (les seuils de l'analyse en dépendent) */
+function v5Decode(jpg, rot){
+  rot = rot || 0;
   return new Promise((ok,ko)=>{
     const url = URL.createObjectURL(new Blob([jpg], {type:"image/jpeg"})), im = new Image();
     im.onload = ()=>{
-      const k = Math.min(1.25, Math.max(0.5, 3100/im.width));
-      const w = Math.round(im.width*k), h = Math.round(im.height*k);
+      const side = rot===90 || rot===270;
+      const sw = side ? im.height : im.width, sh = side ? im.width : im.height;
+      const k = Math.min(1.25, Math.max(0.5, 3100/sw));
+      const w = Math.round(sw*k), h = Math.round(sh*k);
       const c = document.createElement("canvas"); c.width = w; c.height = h;
       const x = c.getContext("2d", {willReadFrequently:true});
       x.fillStyle = "#fff"; x.fillRect(0,0,w,h);
-      x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, w, h);
+      x.imageSmoothingQuality = "high";
+      x.save(); x.translate(w/2, h/2); x.rotate(rot*Math.PI/180);
+      x.drawImage(im, -im.width*k/2, -im.height*k/2, im.width*k, im.height*k); x.restore();
       const d = x.getImageData(0,0,w,h).data, g = new Uint8Array(w*h);
       for(let i=0;i<g.length;i++) g[i] = (d[i*4]*0.299 + d[i*4+1]*0.587 + d[i*4+2]*0.114)|0;
       URL.revokeObjectURL(url); ok({gray:g, w, h});
@@ -5071,6 +5114,46 @@ function v5Decode(jpg){
     im.onerror = ()=>{ URL.revokeObjectURL(url); ko(new Error("Image de la feuille illisible.")); };
     im.src = url;
   });
+}
+
+/* pdf.js (CDN, comme Tesseract) : assemble toutes les couches d'un scan — fond JPEG + masques 1 bit des scanners
+   « MRC » (Canon…), où le texte noir n'est PAS dans le JPEG — et applique le sens de la page */
+const PDFJS_BASE = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/";
+let pdfjsP = null;
+function loadPdfJs(){
+  if(pdfjsP) return pdfjsP;
+  pdfjsP = (async()=>{
+    const lib = await import(PDFJS_BASE + "pdf.min.mjs");
+    try{ globalThis.pdfjsWorker = await import(PDFJS_BASE + "pdf.worker.min.mjs"); }catch(e){}
+    lib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + "pdf.worker.min.mjs";
+    return lib;
+  })().catch(e=>{ pdfjsP = null; throw e; });
+  return pdfjsP;
+}
+/* une fonction par page : render(rot) -> {gray, w, h} (niveaux de gris, ~3100 px de large une fois la page remise à l'endroit) */
+async function v5PageSources(bytes){
+  try{
+    const lib = await loadPdfJs();
+    const doc = await lib.getDocument({data: bytes.slice(0), isEvalSupported:false}).promise;
+    const out = [];
+    for(let n=1;n<=doc.numPages;n++){
+      const page = await doc.getPage(n);
+      out.push(async rot=>{
+        const v1 = page.getViewport({scale:1, rotation:rot});
+        const vp = page.getViewport({scale:3100/v1.width, rotation:rot});
+        const c = document.createElement("canvas"); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+        const x = c.getContext("2d", {willReadFrequently:true});
+        x.fillStyle = "#fff"; x.fillRect(0,0,c.width,c.height);
+        await page.render({canvasContext:x, viewport:vp}).promise;
+        const d = x.getImageData(0,0,c.width,c.height).data, g = new Uint8Array(c.width*c.height);
+        for(let i=0;i<g.length;i++) g[i] = (d[i*4]*0.299 + d[i*4+1]*0.587 + d[i*4+2]*0.114)|0;
+        return {gray:g, w:c.width, h:c.height};
+      });
+    }
+    if(out.length) return out;
+  }catch(e){ console.warn("pdf.js indisponible, repli sur l'image JPEG de chaque page :", e); }
+  /* repli (hors connexion à pdf.js) : image JPEG de chaque page */
+  return v5FindJpegs(bytes).map(j=> rot=>v5Decode(j, rot));
 }
 
 let tessScan = null;
@@ -5083,11 +5166,13 @@ async function v5Worker(){
   return tessScan;
 }
 
-/* PDF scanné -> résultat au format commun (null si le PDF ne contient aucune image) */
+/* PDF scanné -> résultat au format commun (null si le PDF ne contient aucune image).
+   Le sens de la page est détecté automatiquement (0°, 90°, 270°, 180°) : une feuille paysage scannée en portrait,
+   ou dont les pages n'ont pas toutes le même sens, est remise à l'endroit avant lecture. */
 async function v5ScanPdf(bytes){
-  const jpgs = v5FindJpegs(bytes);
-  if(!jpgs.length) return null;
   wizSetStatus("Feuille scannée : chargement du module de lecture (première fois uniquement)…");
+  const sources = await v5PageSources(bytes);
+  if(!sources.length) return null;
   const worker = await v5Worker();
   const ocr = async (crop, psm)=>{
     await worker.setParameters({tessedit_pageseg_mode: psm});
@@ -5098,16 +5183,28 @@ async function v5ScanPdf(bytes){
     const r = await worker.recognize(c);
     return r.data.text || "";
   };
-  const pages = [];
-  for(let i=0;i<jpgs.length;i++){
-    WZ.baseStatus = "Lecture de la page "+(i+1)+" / "+jpgs.length+"…";
+  const pages = [], skipped = [];
+  let lastRot = 0;
+  for(let i=0;i<sources.length;i++){
+    WZ.baseStatus = "Lecture de la page "+(i+1)+" / "+sources.length+"…";
     wizSetStatus(WZ.baseStatus);
-    const img = await v5Decode(jpgs[i]);
-    const p = await v5ReadPage(img.gray, img.w, img.h, ocr);
-    if(!p) throw new Error("Tableau d'émargement non reconnu sur la page "+(i+1)+" : la feuille doit être de face, bien cadrée, avec les lignes du tableau visibles.");
-    pages.push(p);
+    let found = null;
+    for(const rot of [lastRot].concat([0,90,270,180].filter(r=>r!==lastRot))){
+      const img = await sources[i](rot);
+      const lay = v5Layout(img.gray, img.w, img.h);
+      if(!lay) continue;
+      /* même sens que la page précédente : accepté d'emblée ; sinon l'en-tête doit être lisible dans ce sens */
+      let p = null;
+      try{ p = await v5ReadPage(img.gray, img.w, img.h, ocr, lay, (pages.length && rot===lastRot) ? null : v5HeadOk); }
+      catch(e){ p = null; }   // un sens de lecture absurde ne doit pas interrompre les autres essais
+      if(p){ found = p; lastRot = rot; break; }
+    }
+    if(found) pages.push(found); else skipped.push(i+1);
   }
-  return v5Build(pages, [], "ocr");
+  if(!pages.length) throw new Error("Tableau d'émargement non reconnu : la feuille doit être lisible, avec les lignes du tableau visibles (le sens de la page est détecté automatiquement).");
+  const res = v5Build(pages, [], "ocr");
+  if(skipped.length) res.warnings.push("Page" + (skipped.length>1?"s":"") + " " + skipped.join(", ") + " sans tableau d'émargement (page de signature de l'intervenant, par exemple) : ignorée" + (skipped.length>1?"s":"") + ".");
+  return res;
 }
 
 /* ouverture d'une sauvegarde .json (même traitement que « Ouvrir (.json) ») */
@@ -5137,6 +5234,13 @@ async function handlePdf(file){
           ? "Ce PDF est protégé par un chiffrement non pris en charge (" + items.encrypted + "). Ouvrez-le puis ré-enregistrez-le en PDF, ou collez la liste des participants depuis l'onglet 1."
           : "Ce PDF ne contient ni texte ni image de feuille exploitable. Utilisez le PDF d'origine ou un scan de la feuille, ou collez la liste des participants depuis l'onglet 1.";
         renderWizard(); return;
+      }
+      if(!CLEAN(scanned.session.numero)){
+        const mf = /(?:^|[^A-Za-z])([A-Za-z]{2,5})[_-](\d{4,})(?!\d)/.exec(String(file.name||"").replace(/\.[A-Za-z0-9]+$/,""));
+        if(mf){
+          scanned.session.numero = mf[1].toUpperCase() + "_" + mf[2]; scanned.session.numeroSource = "fichier";
+          scanned.warnings.push("Code de session non lu sur le scan : « " + scanned.session.numero + " » repris du nom du fichier — à vérifier.");
+        }
       }
       res = finalizeEmargement(scanned, {fileName: file.name || ""});
     } else {
